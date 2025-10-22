@@ -2,17 +2,17 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for better caching
 COPY package*.json ./
 COPY nx.json ./
 COPY tsconfig.base.json ./
 COPY tsconfig.json ./
 
-# Copy the entire workspace structure
-COPY . .
+# Install dependencies first (this layer will be cached if package files don't change)
+RUN npm install --omit=dev
 
-# Install dependencies
-RUN npm ci --only=production
+# Copy the rest of the workspace structure
+COPY . .
 
 # Build the application
 RUN npx nx build nextjs-app
