@@ -1,26 +1,53 @@
 # ---- Build stage ----
-  FROM node:20-alpine AS builder
-  WORKDIR /app
+FROM node:20-alpine AS builder
+WORKDIR /app
 
-  COPY package*.json ./
-  COPY nx.json ./
-  COPY tsconfig.base.json ./
-  COPY apps/nextjs-app ./apps/nextjs-app
+# Copy package files
+COPY package*.json ./
+COPY nx.json ./
+COPY tsconfig.base.json ./
+COPY tsconfig.json ./
 
-  RUN npm install
-  RUN npm run build nextjs-app
+# Copy the entire workspace structure
+COPY . .
 
-  # ---- Run stage ----
-  FROM node:20-alpine AS runner
-  WORKDIR /app
+# Install dependencies
+RUN npm ci --only=production
 
-  ENV NODE_ENV=production
+# Build the application
+RUN npx nx build nextjs-app
 
-  # انسخ فقط الملفات المطلوبة للتشغيل
-  COPY --from=builder /app/apps/nextjs-app/.next ./.next
-  COPY --from=builder /app/apps/nextjs-app/public ./public
-  COPY --from=builder /app/package*.json ./
+# ---- Run stage ----
+FROM node:20-alpine AS runner
+WORKDIR /app
 
-  EXPOSE 3000
+# Create a non-root user
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
 
-  CMD ["npm", "start"]
+# Set environment variables
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Copy package files
+COPY --from=builder /app/package*.json ./
+
+# Install only production dependencies
+RUN npm ci --only=production && npm cache clean --force
+
+# Copy built application
+COPY --from=builder --chown=nextjs:nodejs /app/apps/nextjs-app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/nextjs-app/.next/static ./apps/nextjs-app/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/nextjs-app/public ./apps/nextjs-app/public
+
+# Switch to non-root user
+USER nextjs
+
+# Expose port
+EXPOSE 3000
+
+# Set environment variable for port
+ENV PORT=3000
+
+# Start the application
+CMD ["node", "apps/nextjs-app/server.js"]
