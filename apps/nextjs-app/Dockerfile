@@ -8,8 +8,8 @@ COPY nx.json ./
 COPY tsconfig.base.json ./
 COPY tsconfig.json ./
 
-# Install dependencies first (this layer will be cached if package files don't change)
-RUN npm install --omit=dev
+# Install all dependencies (including dev dependencies for build)
+RUN npm install
 
 # Copy the rest of the workspace structure
 COPY . .
@@ -33,7 +33,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder /app/package*.json ./
 
 # Install only production dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 # Copy built application
 COPY --from=builder --chown=nextjs:nodejs /app/apps/nextjs-app/.next/standalone ./
