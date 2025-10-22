@@ -1,0 +1,39 @@
+name: Deploy to k3s
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push Docker image
+        run: |
+          IMAGE=ghcr.io/${{ secrets.REGISTRY_USERNAME }}/nextjs-monorepo:latest
+          docker build -t $IMAGE -f apps/nextjs-app/Dockerfile .
+          docker push $IMAGE
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Set up kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
+          export KUBECONFIG=kubeconfig
+          kubectl config get-contexts
+
+      - name: Deploy to k3s
+        run: |
+          export KUBECONFIG=kubeconfig
+          kubectl apply -f k8s/deployment.yaml
+          kubectl rollout status deployment/nextjs-app
