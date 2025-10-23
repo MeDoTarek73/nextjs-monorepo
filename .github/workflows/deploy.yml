@@ -44,12 +44,43 @@ jobs:
           echo "Checking if package exists: $PACKAGE_NAME"
           sleep 10  # Wait for package to be created
 
-          # Check if package exists first
+          # Check token permissions
+          echo "Checking token permissions..."
+          TOKEN_CHECK=$(curl -s -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/user")
+
+          TOKEN_HTTP_CODE="${TOKEN_CHECK: -3}"
+          echo "Token check response: $TOKEN_HTTP_CODE"
+
+          if [ "$TOKEN_HTTP_CODE" = "200" ]; then
+            echo "✅ Token is valid"
+          else
+            echo "❌ Token validation failed (HTTP $TOKEN_HTTP_CODE)"
+            echo "🔍 Check if REGISTRY_PASSWORD has correct permissions"
+          fi
+
+          # Check if package exists first (try different endpoints)
+          echo "Checking package via users endpoint..."
           PACKAGE_CHECK=$(curl -s -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/users/${{ github.actor }}/packages/container/$PACKAGE_NAME")
+
+          HTTP_CODE="${PACKAGE_CHECK: -3}"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Trying repository endpoint..."
+            PACKAGE_CHECK=$(curl -s -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${{ github.repository }}/packages/container/$PACKAGE_NAME")
+
+            HTTP_CODE="${PACKAGE_CHECK: -3}"
+          fi
 
           HTTP_CODE="${PACKAGE_CHECK: -3}"
           echo "Package check response: $HTTP_CODE"
@@ -61,12 +92,40 @@ jobs:
             OWNER=$(echo "${PACKAGE_CHECK%???}" | grep -o '"login": "[^"]*"' | cut -d'"' -f4)
             echo "Package owner: $OWNER"
 
+            # Try different API endpoints
+            echo "Trying endpoint 1: users/$OWNER/packages/container/$PACKAGE_NAME/visibility"
             PUBLIC_RESPONSE=$(curl -s -w "%{http_code}" -X PATCH \
               -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
               "https://api.github.com/users/$OWNER/packages/container/$PACKAGE_NAME/visibility" \
               -d '{"visibility":"public"}')
+
+            PUBLIC_HTTP_CODE="${PUBLIC_RESPONSE: -3}"
+
+            if [ "$PUBLIC_HTTP_CODE" = "404" ]; then
+              echo "Trying endpoint 2: repos/${{ github.repository }}/packages/container/$PACKAGE_NAME/visibility"
+              PUBLIC_RESPONSE=$(curl -s -w "%{http_code}" -X PATCH \
+                -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${{ github.repository }}/packages/container/$PACKAGE_NAME/visibility" \
+                -d '{"visibility":"public"}')
+
+              PUBLIC_HTTP_CODE="${PUBLIC_RESPONSE: -3}"
+            fi
+
+            if [ "$PUBLIC_HTTP_CODE" = "404" ]; then
+              echo "Trying endpoint 3: orgs/$OWNER/packages/container/$PACKAGE_NAME/visibility"
+              PUBLIC_RESPONSE=$(curl -s -w "%{http_code}" -X PATCH \
+                -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/orgs/$OWNER/packages/container/$PACKAGE_NAME/visibility" \
+                -d '{"visibility":"public"}')
+
+              PUBLIC_HTTP_CODE="${PUBLIC_RESPONSE: -3}"
+            fi
 
             PUBLIC_HTTP_CODE="${PUBLIC_RESPONSE: -3}"
             echo "Make public response code: $PUBLIC_HTTP_CODE"
@@ -79,6 +138,12 @@ jobs:
               echo "❌ Failed to make package public (HTTP $PUBLIC_HTTP_CODE)"
               echo "🔍 This might be a permissions issue or the package doesn't exist yet"
               echo "📦 Package is still private at: https://github.com/users/$OWNER/packages/container/package/$PACKAGE_NAME"
+              echo ""
+              echo "🔧 Manual steps to make package public:"
+              echo "1. Go to: https://github.com/users/$OWNER/packages/container/package/$PACKAGE_NAME"
+              echo "2. Click on 'Package settings'"
+              echo "3. Scroll down to 'Danger Zone'"
+              echo "4. Click 'Change visibility' and select 'Public'"
             fi
           else
             echo "⚠️  Package not found yet (HTTP $HTTP_CODE) - this is normal for first run"
