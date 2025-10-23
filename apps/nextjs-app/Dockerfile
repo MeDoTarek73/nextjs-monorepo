@@ -53,5 +53,10 @@ EXPOSE 3000
 # Set environment variable for port
 ENV PORT=3000
 
+# Add labels to link package to repository
+LABEL org.opencontainers.image.source=https://github.com/MeDoTarek73/nextjs-monorepo
+LABEL org.opencontainers.image.description="Next.js monorepo application"
+LABEL org.opencontainers.image.licenses=MIT
+
 # Start the application
 CMD ["node", "apps/nextjs-app/server.js"]
