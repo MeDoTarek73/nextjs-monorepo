@@ -20,7 +20,7 @@ jobs:
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
       - name: Build and push Docker image
@@ -34,7 +34,7 @@ jobs:
           curl -X PATCH \
             -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/users/${{ github.repository_owner }}/packages/container/$(basename ${{ github.repository }})/visibility \
+            https://api.github.com/users/${{ secrets.REGISTRY_USERNAME }}/packages/container/$(basename ${{ github.repository }})/visibility \
             -d '{"visibility":"public"}' || true
 
       - name: Set up kubectl
