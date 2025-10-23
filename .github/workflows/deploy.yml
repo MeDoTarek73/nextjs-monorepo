@@ -14,98 +14,33 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v2
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ secrets.REGISTRY_USERNAME }}
+          username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Debug environment
-        run: |
-          echo "GitHub Repository: ${{ github.repository }}"
-          echo "GitHub Actor: ${{ github.actor }}"
-          echo "Registry Username: ${{ secrets.REGISTRY_USERNAME }}"
-          echo "Registry Password length: ${#REGISTRY_PASSWORD}"
-          echo "Working Directory: $(pwd)"
-          echo "Files in current directory:"
-          ls -la
-          echo "Files in apps/nextjs-app:"
-          ls -la apps/nextjs-app/
-
-          # Check if secrets are set
-          if [ -z "${{ secrets.REGISTRY_USERNAME }}" ]; then
-            echo "❌ REGISTRY_USERNAME is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.REGISTRY_PASSWORD }}" ]; then
-            echo "❌ REGISTRY_PASSWORD is not set"
-            exit 1
-          fi
-          echo "✅ All secrets are set"
-
-      - name: Build and push Docker image
+      - name: Build and push image
         run: |
           IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}:latest" | tr '[:upper:]' '[:lower:]')
-          PACKAGE_NAME=$(basename ${{ github.repository }})
-          echo "Building image $IMAGE_NAME..."
-          echo "Package name: $PACKAGE_NAME"
-          echo "Repository: ${{ github.repository }}"
-          echo "Registry username: ${{ secrets.REGISTRY_USERNAME }}"
-
-          # Test Docker login first
-          echo "Testing Docker login..."
-          echo ${{ secrets.REGISTRY_PASSWORD }} | docker login ghcr.io -u ${{ secrets.REGISTRY_USERNAME }} --password-stdin
-
-          # Build with verbose output
-          echo "Building Docker image..."
-          docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile . --progress=plain
-
-          # Test if image was built successfully
-          echo "Checking if image exists locally..."
-          docker images | grep $PACKAGE_NAME || echo "Image not found locally"
-
-          # Push the image
-          echo "Pushing image to registry..."
+          docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
           docker push $IMAGE_NAME
 
-          echo "Waiting for package to be created..."
-          sleep 15
-
-          echo "Attempting to make package public..."
-          # Try to make package public - this will work if package exists
-          PUBLIC_RESPONSE=$(curl -s -w "%{http_code}" -X PATCH \
+      - name: Make package public (optional)
+        run: |
+          PACKAGE_NAME=$(basename ${{ github.repository }})
+          curl -X PATCH \
             -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
             -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/users/${{ secrets.REGISTRY_USERNAME }}/packages/container/$PACKAGE_NAME/visibility" \
-            -d '{"visibility":"public"}')
-
-          PUBLIC_HTTP_CODE="${PUBLIC_RESPONSE: -3}"
-          echo "Make public response code: $PUBLIC_HTTP_CODE"
-
-          if [ "$PUBLIC_HTTP_CODE" = "200" ] || [ "$PUBLIC_HTTP_CODE" = "204" ]; then
-            echo "✅ Package made public successfully"
-          elif [ "$PUBLIC_HTTP_CODE" = "404" ]; then
-            echo "⚠️  Package not found yet (HTTP 404) - this is normal for first run"
-            echo "📦 Package will be created automatically on first successful push"
-            echo "🔄 You can manually make it public later from GitHub Packages page"
-          else
-            echo "❌ Failed to make package public (HTTP $PUBLIC_HTTP_CODE)"
-            echo "Response: ${PUBLIC_RESPONSE%???}"
-            echo "🔍 Check your REGISTRY_USERNAME and REGISTRY_PASSWORD secrets"
-          fi
-
-      - name: Set up kubectl
-        run: |
-          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
-          export KUBECONFIG=kubeconfig
-          kubectl config get-contexts
+            https://api.github.com/repos/${{ github.repository }}/packages/container/$PACKAGE_NAME/visibility \
+            -d '{"visibility":"public"}' || true
 
       - name: Deploy to k3s
         run: |
+          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
           export KUBECONFIG=kubeconfig
           kubectl apply -f k8s/deployment.yaml
           kubectl rollout status deployment/nextjs-app
