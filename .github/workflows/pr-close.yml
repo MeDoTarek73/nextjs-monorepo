@@ -1,0 +1,22 @@
+name: Cleanup PR Environment
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
+          export KUBECONFIG=kubeconfig
+          NS=pr-${{ github.event.pull_request.number }}
+          echo "🧹 Deleting namespace $NS"
+          kubectl delete namespace $NS --ignore-not-found=true

@@ -1,0 +1,110 @@
+name: Deploy PR Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push PR Docker image
+        run: |
+          IMAGE_TAG=pr-${{ github.event.pull_request.number }}
+          IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}:$IMAGE_TAG" | tr '[:upper:]' '[:lower:]')
+          docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
+          docker push $IMAGE_NAME
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+
+      - name: Set up kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
+          export KUBECONFIG=kubeconfig
+          kubectl config get-contexts
+
+      - name: Deploy PR environment
+        run: |
+          export KUBECONFIG=kubeconfig
+          NS=pr-${{ github.event.pull_request.number }}
+          HOST=pr-${{ github.event.pull_request.number }}.yourdomain.com
+
+          kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
+
+          cat <<EOF | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nextjs-app
+            namespace: $NS
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nextjs-app
+            template:
+              metadata:
+                labels:
+                  app: nextjs-app
+              spec:
+                containers:
+                  - name: nextjs-app
+                    image: $IMAGE_NAME
+                    ports:
+                      - containerPort: 3000
+                imagePullSecrets:
+                  - name: ghcr-secret
+          EOF
+
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nextjs-service
+            namespace: $NS
+          spec:
+            type: ClusterIP
+            selector:
+              app: nextjs-app
+            ports:
+              - port: 80
+                targetPort: 3000
+          EOF
+
+          cat <<EOF | kubectl apply -f -
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: nextjs-ingress
+            namespace: $NS
+            annotations:
+              traefik.ingress.kubernetes.io/router.entrypoints: web
+          spec:
+            rules:
+              - host: $HOST
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: nextjs-service
+                          port:
+                            number: 80
+          EOF
+
+          echo "✅ Deployed preview: http://$HOST"
