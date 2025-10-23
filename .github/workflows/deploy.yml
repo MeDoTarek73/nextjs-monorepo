@@ -20,7 +20,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
       - name: Set up Docker Buildx
@@ -31,6 +31,9 @@ jobs:
           # Convert repository name to lowercase
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "Building image: ghcr.io/$REPO_NAME:latest"
+          echo "Repository: ${{ github.repository }}"
+          echo "Repository owner: ${{ github.repository_owner }}"
+          echo "Actor: ${{ github.actor }}"
 
           docker buildx build \
             --platform linux/amd64 \
@@ -38,6 +41,8 @@ jobs:
             --tag ghcr.io/$REPO_NAME:latest \
             --tag ghcr.io/$REPO_NAME:${{ github.sha }} \
             --push .
+
+          echo "✅ Image pushed successfully"
 
       - name: Make package public (optional)
         run: |
@@ -69,6 +74,11 @@ jobs:
           echo "1. Wait 5-10 minutes for GitHub to process"
           echo "2. Check if package is private and needs manual public setting"
           echo "3. Verify Container Registry is enabled for the repository"
+          echo ""
+          echo "🔧 If package appears under user account instead of repository:"
+          echo "1. Check if repository has Container Registry enabled"
+          echo "2. Verify repository settings > Actions > Workflow permissions"
+          echo "3. Ensure the package is created under the repository, not user account"
 
       - name: Deploy to k3s
         run: |
