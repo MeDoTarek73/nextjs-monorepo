@@ -38,7 +38,7 @@ jobs:
       - name: Make package public (optional)
         run: |
           # Use the same normalized name
-          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._\/-]/-/g')
+          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           PACKAGE_NAME=$(basename $REPO_NAME)
 
           echo "Checking if package exists: $PACKAGE_NAME"
