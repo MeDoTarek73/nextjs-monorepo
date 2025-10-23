@@ -25,8 +25,8 @@ jobs:
 
       - name: Build and push image
         run: |
-          # Normalize repository name for Docker tags
-          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+          # Just convert to lowercase, keep the organization/repo structure
+          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_NAME="ghcr.io/$REPO_NAME:latest"
           echo "Building image: $IMAGE_NAME"
 
@@ -38,7 +38,7 @@ jobs:
       - name: Make package public (optional)
         run: |
           # Use the same normalized name
-          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._\/-]/-/g')
           PACKAGE_NAME=$(basename $REPO_NAME)
 
           echo "Checking if package exists: $PACKAGE_NAME"
