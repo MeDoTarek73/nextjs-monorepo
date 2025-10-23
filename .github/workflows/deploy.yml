@@ -57,11 +57,15 @@ jobs:
 
           if [ "$HTTP_CODE" = "200" ]; then
             echo "✅ Package exists, making it public..."
+            # Extract owner from the response
+            OWNER=$(echo "${PACKAGE_CHECK%???}" | grep -o '"login": "[^"]*"' | cut -d'"' -f4)
+            echo "Package owner: $OWNER"
+
             PUBLIC_RESPONSE=$(curl -s -w "%{http_code}" -X PATCH \
               -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/users/${{ github.actor }}/packages/container/$PACKAGE_NAME/visibility" \
+              "https://api.github.com/users/$OWNER/packages/container/$PACKAGE_NAME/visibility" \
               -d '{"visibility":"public"}')
 
             PUBLIC_HTTP_CODE="${PUBLIC_RESPONSE: -3}"
@@ -70,9 +74,11 @@ jobs:
 
             if [ "$PUBLIC_HTTP_CODE" = "200" ] || [ "$PUBLIC_HTTP_CODE" = "204" ]; then
               echo "✅ Package made public successfully"
+              echo "📦 Package should now be visible at: https://github.com/users/$OWNER/packages/container/package/$PACKAGE_NAME"
             else
               echo "❌ Failed to make package public (HTTP $PUBLIC_HTTP_CODE)"
               echo "🔍 This might be a permissions issue or the package doesn't exist yet"
+              echo "📦 Package is still private at: https://github.com/users/$OWNER/packages/container/package/$PACKAGE_NAME"
             fi
           else
             echo "⚠️  Package not found yet (HTTP $HTTP_CODE) - this is normal for first run"
