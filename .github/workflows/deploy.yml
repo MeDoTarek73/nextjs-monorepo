@@ -21,7 +21,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
 
       - name: Build and push Docker image to GHCR
         run: |
@@ -33,7 +33,7 @@ jobs:
 
           echo "Making package public (if private)..."
           curl -X PATCH \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/users/${{ github.repository_owner }}/packages/container/$(basename ${{ github.repository }})/visibility \
             -d '{"visibility":"public"}' || true
