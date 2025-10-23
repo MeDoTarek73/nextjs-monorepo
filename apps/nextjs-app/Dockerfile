@@ -15,7 +15,11 @@ RUN npm install
 COPY . .
 
 # Build the application
-RUN npx nx build nextjs-app
+RUN npx nx build nextjs-app --verbose
+
+# Verify build output
+RUN ls -la apps/nextjs-app/.next/ || echo "Build output not found"
+RUN ls -la apps/nextjs-app/.next/standalone/ || echo "Standalone output not found"
 
 # ---- Run stage ----
 FROM node:20-alpine AS runner

@@ -23,14 +23,52 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
+      - name: Debug environment
+        run: |
+          echo "GitHub Repository: ${{ github.repository }}"
+          echo "GitHub Actor: ${{ github.actor }}"
+          echo "Registry Username: ${{ secrets.REGISTRY_USERNAME }}"
+          echo "Registry Password length: ${#REGISTRY_PASSWORD}"
+          echo "Working Directory: $(pwd)"
+          echo "Files in current directory:"
+          ls -la
+          echo "Files in apps/nextjs-app:"
+          ls -la apps/nextjs-app/
+
+          # Check if secrets are set
+          if [ -z "${{ secrets.REGISTRY_USERNAME }}" ]; then
+            echo "❌ REGISTRY_USERNAME is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.REGISTRY_PASSWORD }}" ]; then
+            echo "❌ REGISTRY_PASSWORD is not set"
+            exit 1
+          fi
+          echo "✅ All secrets are set"
+
       - name: Build and push Docker image
         run: |
           IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}:latest" | tr '[:upper:]' '[:lower:]')
           PACKAGE_NAME=$(basename ${{ github.repository }})
           echo "Building image $IMAGE_NAME..."
           echo "Package name: $PACKAGE_NAME"
+          echo "Repository: ${{ github.repository }}"
+          echo "Registry username: ${{ secrets.REGISTRY_USERNAME }}"
 
-          docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
+          # Test Docker login first
+          echo "Testing Docker login..."
+          echo ${{ secrets.REGISTRY_PASSWORD }} | docker login ghcr.io -u ${{ secrets.REGISTRY_USERNAME }} --password-stdin
+
+          # Build with verbose output
+          echo "Building Docker image..."
+          docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile . --progress=plain
+
+          # Test if image was built successfully
+          echo "Checking if image exists locally..."
+          docker images | grep $PACKAGE_NAME || echo "Image not found locally"
+
+          # Push the image
+          echo "Pushing image to registry..."
           docker push $IMAGE_NAME
 
           echo "Waiting for package to be created..."
