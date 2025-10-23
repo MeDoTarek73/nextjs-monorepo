@@ -26,16 +26,36 @@ jobs:
       - name: Build and push Docker image
         run: |
           IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}:latest" | tr '[:upper:]' '[:lower:]')
+          PACKAGE_NAME=$(basename ${{ github.repository }})
           echo "Building image $IMAGE_NAME..."
+          echo "Package name: $PACKAGE_NAME"
+
           docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
           docker push $IMAGE_NAME
 
-          echo "Making package public (if private)..."
-          curl -X PATCH \
+          echo "Waiting for package to be created..."
+          sleep 10
+
+          echo "Checking if package exists..."
+          PACKAGE_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/users/${{ secrets.REGISTRY_USERNAME }}/packages/container/$(basename ${{ github.repository }})/visibility \
-            -d '{"visibility":"public"}' || true
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/users/${{ secrets.REGISTRY_USERNAME }}/packages/container/$PACKAGE_NAME")
+
+          if [ "$PACKAGE_EXISTS" = "200" ]; then
+            echo "Package exists, making it public..."
+            curl -X PATCH \
+              -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/users/${{ secrets.REGISTRY_USERNAME }}/packages/container/$PACKAGE_NAME/visibility" \
+              -d '{"visibility":"public"}'
+            echo "Package made public successfully"
+          else
+            echo "Package not found (HTTP $PACKAGE_EXISTS) - this is normal for first run"
+            echo "Package will be created automatically on first successful push"
+          fi
 
       - name: Set up kubectl
         run: |
