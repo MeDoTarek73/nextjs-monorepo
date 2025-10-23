@@ -25,18 +25,48 @@ jobs:
 
       - name: Build and push image
         run: |
-          IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}:latest" | tr '[:upper:]' '[:lower:]')
+          # Normalize repository name for Docker tags
+          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+          IMAGE_NAME="ghcr.io/$REPO_NAME:latest"
+          echo "Building image: $IMAGE_NAME"
+
           docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
           docker push $IMAGE_NAME
 
+          echo "✅ Image pushed successfully: $IMAGE_NAME"
+
       - name: Make package public (optional)
         run: |
-          PACKAGE_NAME=$(basename ${{ github.repository }})
-          curl -X PATCH \
+          # Use the same normalized name
+          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+          PACKAGE_NAME=$(basename $REPO_NAME)
+
+          echo "Checking if package exists: $PACKAGE_NAME"
+          sleep 10  # Wait for package to be created
+
+          # Check if package exists first
+          PACKAGE_CHECK=$(curl -s -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/packages/container/$PACKAGE_NAME/visibility \
-            -d '{"visibility":"public"}' || true
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/users/${{ github.actor }}/packages/container/$PACKAGE_NAME")
+
+          HTTP_CODE="${PACKAGE_CHECK: -3}"
+          echo "Package check response: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Package exists, making it public..."
+            curl -X PATCH \
+              -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/users/${{ github.actor }}/packages/container/$PACKAGE_NAME/visibility" \
+              -d '{"visibility":"public"}'
+            echo "✅ Package made public successfully"
+          else
+            echo "⚠️  Package not found yet (HTTP $HTTP_CODE) - this is normal for first run"
+            echo "📦 Package will appear in GitHub Packages after a few minutes"
+          fi
 
       - name: Deploy to k3s
         run: |
