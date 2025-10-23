@@ -34,27 +34,30 @@ jobs:
           docker push $IMAGE_NAME
 
           echo "Waiting for package to be created..."
-          sleep 10
+          sleep 15
 
-          echo "Checking if package exists..."
-          PACKAGE_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
+          echo "Attempting to make package public..."
+          # Try to make package public - this will work if package exists
+          PUBLIC_RESPONSE=$(curl -s -w "%{http_code}" -X PATCH \
             -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/users/${{ secrets.REGISTRY_USERNAME }}/packages/container/$PACKAGE_NAME")
+            "https://api.github.com/users/${{ secrets.REGISTRY_USERNAME }}/packages/container/$PACKAGE_NAME/visibility" \
+            -d '{"visibility":"public"}')
 
-          if [ "$PACKAGE_EXISTS" = "200" ]; then
-            echo "Package exists, making it public..."
-            curl -X PATCH \
-              -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/users/${{ secrets.REGISTRY_USERNAME }}/packages/container/$PACKAGE_NAME/visibility" \
-              -d '{"visibility":"public"}'
-            echo "Package made public successfully"
+          PUBLIC_HTTP_CODE="${PUBLIC_RESPONSE: -3}"
+          echo "Make public response code: $PUBLIC_HTTP_CODE"
+
+          if [ "$PUBLIC_HTTP_CODE" = "200" ] || [ "$PUBLIC_HTTP_CODE" = "204" ]; then
+            echo "✅ Package made public successfully"
+          elif [ "$PUBLIC_HTTP_CODE" = "404" ]; then
+            echo "⚠️  Package not found yet (HTTP 404) - this is normal for first run"
+            echo "📦 Package will be created automatically on first successful push"
+            echo "🔄 You can manually make it public later from GitHub Packages page"
           else
-            echo "Package not found (HTTP $PACKAGE_EXISTS) - this is normal for first run"
-            echo "Package will be created automatically on first successful push"
+            echo "❌ Failed to make package public (HTTP $PUBLIC_HTTP_CODE)"
+            echo "Response: ${PUBLIC_RESPONSE%???}"
+            echo "🔍 Check your REGISTRY_USERNAME and REGISTRY_PASSWORD secrets"
           fi
 
       - name: Set up kubectl
