@@ -20,15 +20,17 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
       - name: Build and push image
         run: |
-          # Just convert to lowercase, keep the organization/repo structure
+          # Use repository name for package
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_NAME="ghcr.io/$REPO_NAME:latest"
           echo "Building image: $IMAGE_NAME"
+          echo "Repository owner: ${{ github.repository_owner }}"
+          echo "Repository: ${{ github.repository }}"
 
           docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
           docker push $IMAGE_NAME
@@ -37,9 +39,12 @@ jobs:
 
       - name: Make package public (optional)
         run: |
-          # Use the same normalized name
+          # Use repository name for package
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           PACKAGE_NAME=$(basename $REPO_NAME)
+          echo "Repository: ${{ github.repository }}"
+          echo "Repository owner: ${{ github.repository_owner }}"
+          echo "Package name: $PACKAGE_NAME"
 
           echo "Checking if package exists: $PACKAGE_NAME"
           sleep 10  # Wait for package to be created
@@ -61,23 +66,23 @@ jobs:
             echo "🔍 Check if REGISTRY_PASSWORD has correct permissions"
           fi
 
-          # Check if package exists first (try different endpoints)
-          echo "Checking package via users endpoint..."
+          # Check if package exists first (try repository endpoint)
+          echo "Checking package via repository endpoint..."
           PACKAGE_CHECK=$(curl -s -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/users/${{ github.actor }}/packages/container/$PACKAGE_NAME")
+            "https://api.github.com/repos/${{ github.repository }}/packages/container/$PACKAGE_NAME")
 
           HTTP_CODE="${PACKAGE_CHECK: -3}"
 
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "Trying repository endpoint..."
+            echo "Trying users endpoint as fallback..."
             PACKAGE_CHECK=$(curl -s -w "%{http_code}" \
               -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${{ github.repository }}/packages/container/$PACKAGE_NAME")
+              "https://api.github.com/users/${{ github.repository_owner }}/packages/container/$PACKAGE_NAME")
 
             HTTP_CODE="${PACKAGE_CHECK: -3}"
           fi
@@ -92,24 +97,24 @@ jobs:
             OWNER=$(echo "${PACKAGE_CHECK%???}" | grep -o '"login": "[^"]*"' | cut -d'"' -f4)
             echo "Package owner: $OWNER"
 
-            # Try different API endpoints
-            echo "Trying endpoint 1: users/$OWNER/packages/container/$PACKAGE_NAME/visibility"
+            # Try repository endpoint first
+            echo "Trying endpoint 1: repos/${{ github.repository }}/packages/container/$PACKAGE_NAME/visibility"
             PUBLIC_RESPONSE=$(curl -s -w "%{http_code}" -X PATCH \
               -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/users/$OWNER/packages/container/$PACKAGE_NAME/visibility" \
+              "https://api.github.com/repos/${{ github.repository }}/packages/container/$PACKAGE_NAME/visibility" \
               -d '{"visibility":"public"}')
 
             PUBLIC_HTTP_CODE="${PUBLIC_RESPONSE: -3}"
 
             if [ "$PUBLIC_HTTP_CODE" = "404" ]; then
-              echo "Trying endpoint 2: repos/${{ github.repository }}/packages/container/$PACKAGE_NAME/visibility"
+              echo "Trying endpoint 2: users/$OWNER/packages/container/$PACKAGE_NAME/visibility"
               PUBLIC_RESPONSE=$(curl -s -w "%{http_code}" -X PATCH \
                 -H "Authorization: Bearer ${{ secrets.REGISTRY_PASSWORD }}" \
                 -H "Accept: application/vnd.github+json" \
                 -H "X-GitHub-Api-Version: 2022-11-28" \
-                "https://api.github.com/repos/${{ github.repository }}/packages/container/$PACKAGE_NAME/visibility" \
+                "https://api.github.com/users/$OWNER/packages/container/$PACKAGE_NAME/visibility" \
                 -d '{"visibility":"public"}')
 
               PUBLIC_HTTP_CODE="${PUBLIC_RESPONSE: -3}"
@@ -133,17 +138,18 @@ jobs:
 
             if [ "$PUBLIC_HTTP_CODE" = "200" ] || [ "$PUBLIC_HTTP_CODE" = "204" ]; then
               echo "✅ Package made public successfully"
-              echo "📦 Package should now be visible at: https://github.com/users/$OWNER/packages/container/package/$PACKAGE_NAME"
+              echo "📦 Package should now be visible at: https://github.com/${{ github.repository }}/packages"
             else
               echo "❌ Failed to make package public (HTTP $PUBLIC_HTTP_CODE)"
               echo "🔍 This might be a permissions issue or the package doesn't exist yet"
-              echo "📦 Package is still private at: https://github.com/users/$OWNER/packages/container/package/$PACKAGE_NAME"
+              echo "📦 Package is still private at: https://github.com/${{ github.repository }}/packages"
               echo ""
               echo "🔧 Manual steps to make package public:"
-              echo "1. Go to: https://github.com/users/$OWNER/packages/container/package/$PACKAGE_NAME"
-              echo "2. Click on 'Package settings'"
-              echo "3. Scroll down to 'Danger Zone'"
-              echo "4. Click 'Change visibility' and select 'Public'"
+              echo "1. Go to: https://github.com/${{ github.repository }}/packages"
+              echo "2. Find the '$PACKAGE_NAME' package"
+              echo "3. Click on 'Package settings'"
+              echo "4. Scroll down to 'Danger Zone'"
+              echo "5. Click 'Change visibility' and select 'Public'"
             fi
           else
             echo "⚠️  Package not found yet (HTTP $HTTP_CODE) - this is normal for first run"
