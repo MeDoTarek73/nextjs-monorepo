@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v2
@@ -41,70 +43,25 @@ jobs:
         run: |
           export KUBECONFIG=kubeconfig
           NS=pr-${{ github.event.pull_request.number }}
-          HOST=pr-${{ github.event.pull_request.number }}.yourdomain.com
+          HOST=pr-${{ github.event.pull_request.number }}.semibots.com
 
           kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
 
-          cat <<EOF | kubectl apply -f -
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: nextjs-app
-            namespace: $NS
-          spec:
-            replicas: 1
-            selector:
-              matchLabels:
-                app: nextjs-app
-            template:
-              metadata:
-                labels:
-                  app: nextjs-app
-              spec:
-                containers:
-                  - name: nextjs-app
-                    image: $IMAGE_NAME
-                    ports:
-                      - containerPort: 3000
-                imagePullSecrets:
-                  - name: ghcr-secret
-          EOF
+          # Use existing deployment.yaml with namespace and image substitution
+          sed "s/namespace: default/namespace: $NS/g" k8s/deployment.yaml | \
+          sed "s|image: ghcr.io/medotarek73/nextjs-monorepo:latest|image: $IMAGE_NAME|g" | \
+          kubectl apply -f -
 
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: nextjs-service
-            namespace: $NS
-          spec:
-            type: ClusterIP
-            selector:
-              app: nextjs-app
-            ports:
-              - port: 80
-                targetPort: 3000
-          EOF
+          # Use existing service.yaml with namespace substitution
+          sed "s/namespace: default/namespace: $NS/g" k8s/service.yaml | \
+          sed "s/type: LoadBalancer/type: ClusterIP/g" | \
+          kubectl apply -f -
 
-          cat <<EOF | kubectl apply -f -
-          apiVersion: networking.k8s.io/v1
-          kind: Ingress
-          metadata:
-            name: nextjs-ingress
-            namespace: $NS
-            annotations:
-              traefik.ingress.kubernetes.io/router.entrypoints: web
-          spec:
-            rules:
-              - host: $HOST
-                http:
-                  paths:
-                    - path: /
-                      pathType: Prefix
-                      backend:
-                        service:
-                          name: nextjs-service
-                          port:
-                            number: 80
-          EOF
+          # Use existing ingress.yaml with namespace and host substitution
+          sed "s/namespace: default/namespace: $NS/g" k8s/ingress.yaml | \
+          sed "s/host: 'semibots.com'/host: '$HOST'/g" | \
+          sed "s/- 'semibots.com'/- '$HOST'/g" | \
+          sed "s/secretName: wildcard-semibots-com-tls/secretName: wildcard-semibots-com-tls/g" | \
+          kubectl apply -f -
 
           echo "✅ Deployed preview: http://$HOST"

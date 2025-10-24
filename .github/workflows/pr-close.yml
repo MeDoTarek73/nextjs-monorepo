@@ -18,5 +18,10 @@ jobs:
           echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
           export KUBECONFIG=kubeconfig
           NS=pr-${{ github.event.pull_request.number }}
-          echo "🧹 Deleting namespace $NS"
+          echo "🧹 Cleaning up PR environment: $NS"
+          # Delete ingress explicitly to force Traefik to drop the route
+          kubectl delete ingress --all -n $NS --ignore-not-found=true
+          # Wait a few seconds to let Traefik update its configuration
+          sleep 10
+          # Delete the namespace itself
           kubectl delete namespace $NS --ignore-not-found=true
