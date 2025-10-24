@@ -9,8 +9,9 @@ spec:
   ingressClassName: traefik
   tls:
   - hosts:
+    - '*.semibots.com'
     - 'semibots.com'
-    secretName: nextjs-tls
+    secretName: wildcard-semibots-com-tls
   rules:
   - host: 'semibots.com'
     http:

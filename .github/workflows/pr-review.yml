@@ -59,7 +59,7 @@ jobs:
           sed "s/namespace: default/namespace: $NS/g" k8s/ingress.yaml | \
           sed "s/host: 'semibots.com'/host: '$HOST'/g" | \
           sed "s/- 'semibots.com'/- '$HOST'/g" | \
-          sed "s/secretName: nextjs-tls/secretName: nextjs-tls-pr-${{ github.event.pull_request.number }}/g" | \
+          sed "s/secretName: wildcard-semibots-com-tls/secretName: wildcard-semibots-com-tls/g" | \
           kubectl apply -f -
 
           echo "✅ Deployed preview: http://$HOST"
