@@ -57,7 +57,8 @@ jobs:
 
           # Use existing ingress.yaml with namespace and host substitution
           sed "s/namespace: default/namespace: $NS/g" k8s/ingress.yaml | \
-          sed "s/host: semibots.com/host: $HOST/g" | \
+          sed "s/host: 'semibots.com'/host: '$HOST'/g" | \
+          sed "s/- 'semibots.com'/- '$HOST'/g" | \
           sed "s/secretName: nextjs-tls/secretName: nextjs-tls-pr-${{ github.event.pull_request.number }}/g" | \
           kubectl apply -f -
 
