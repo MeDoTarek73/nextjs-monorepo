@@ -76,8 +76,12 @@ jobs:
 
           echo "Injecting namespace $NS into manifests"
           for file in k8s/*.yaml; do
-            # Add namespace inside metadata if not present
-            if ! grep -q "namespace:" "$file"; then
+            # Replace existing namespace or add if not present
+            if grep -q "namespace:" "$file"; then
+              # Replace existing namespace
+              sed -i "s/namespace: .*/namespace: $NS/" "$file"
+            else
+              # Add namespace if not present
               sed -i "s/^metadata:$/metadata:\n  namespace: $NS/" "$file"
             fi
           done
