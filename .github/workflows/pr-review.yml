@@ -3,7 +3,7 @@ name: Deploy PR Preview
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [feature/*]
+    branches: ['feature/*']
 
 permissions:
   contents: read
@@ -32,10 +32,18 @@ jobs:
         run: |
           # Extract tag from branch name (feature/activation-fee -> activation-fee)
           BRANCH_NAME="${{ github.head_ref }}"
+
+          # Check if branch starts with feature/
+          if [[ $BRANCH_NAME != feature/* ]]; then
+            echo "❌ Branch $BRANCH_NAME does not start with feature/"
+            echo "This workflow only runs for feature/* branches"
+            exit 1
+          fi
+
           IMAGE_TAG=${BRANCH_NAME#feature/}
           IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}:$IMAGE_TAG" | tr '[:upper:]' '[:lower:]')
 
-          echo "Branch: $BRANCH_NAME"
+          echo "✅ Feature branch detected: $BRANCH_NAME"
           echo "Tag: $IMAGE_TAG"
           echo "Image: $IMAGE_NAME"
 
