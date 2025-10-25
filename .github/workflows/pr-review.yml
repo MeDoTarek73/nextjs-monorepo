@@ -3,6 +3,8 @@ name: Deploy PR Preview
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -13,10 +15,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check branch prefix
+        run: |
+          BRANCH_NAME="${{ github.head_ref }}"
+          if [[ $BRANCH_NAME != feature/* ]]; then
+            echo "❌ Not a feature branch ($BRANCH_NAME)"
+            exit 0
+          fi
       - name: Checkout code
         uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install kompose
+        run: |
+          curl -L https://github.com/kubernetes/kompose/releases/download/v1.31.2/kompose-linux-amd64 -o kompose
+          chmod +x kompose
+          sudo mv kompose /usr/local/bin/
 
       - name: Log in to GHCR
         uses: docker/login-action@v2
@@ -27,11 +42,18 @@ jobs:
 
       - name: Build and push PR Docker image
         run: |
-          IMAGE_TAG=pr-${{ github.event.pull_request.number }}
-          IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}:$IMAGE_TAG" | tr '[:upper:]' '[:lower:]')
+          BRANCH_NAME="${{ github.head_ref }}"
+          IMAGE_TAG=${BRANCH_NAME#feature/}
+          IMAGE_TAG=$(echo $IMAGE_TAG | tr '[:upper:]' '[:lower:]')
+          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_NAME="ghcr.io/$REPO_NAME:$IMAGE_TAG"
+
+          echo "Building image $IMAGE_NAME"
           docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
           docker push $IMAGE_NAME
+
           echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
       - name: Set up kubectl
         run: |
@@ -42,26 +64,69 @@ jobs:
       - name: Deploy PR environment
         run: |
           export KUBECONFIG=kubeconfig
-          NS=pr-${{ github.event.pull_request.number }}
-          HOST=pr-${{ github.event.pull_request.number }}.semibots.com
 
+          NS=${{ github.head_ref }}
+          NS=${NS#feature/}
+          NS=$(echo $NS | tr '[:upper:]' '[:lower:]')
+          echo "Creating namespace $NS"
           kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
 
-          # Use existing deployment.yaml with namespace and image substitution
-          sed "s/namespace: default/namespace: $NS/g" k8s/deployment.yaml | \
-          sed "s|image: ghcr.io/medotarek73/nextjs-monorepo:latest|image: $IMAGE_NAME|g" | \
-          kubectl apply -f -
+          echo "Converting docker-compose.yml to Kubernetes manifests"
+          # Set IMAGE_TAG environment variable for kompose
+          export IMAGE_TAG=$IMAGE_TAG
+          kompose convert -f apps/nextjs-app/docker-compose.yml -o k8s/
 
-          # Use existing service.yaml with namespace substitution
-          sed "s/namespace: default/namespace: $NS/g" k8s/service.yaml | \
-          sed "s/type: LoadBalancer/type: ClusterIP/g" | \
-          kubectl apply -f -
+          echo "Checking if Java microservice image exists, fallback to latest if not"
+          # Check if the specific Java microservice image exists, if not use latest
+          if ! docker manifest inspect "ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "Java microservice image with tag $IMAGE_TAG not found, using latest"
+            # Update the backend-service deployment to use latest tag
+            sed -i "s|ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG|ghcr.io/medotarek73/java-microservice-api:latest|g" k8s/backend-service-deployment.yaml
+          fi
 
-          # Use existing ingress.yaml with namespace and host substitution
-          sed "s/namespace: default/namespace: $NS/g" k8s/ingress.yaml | \
-          sed "s/host: 'semibots.com'/host: '$HOST'/g" | \
-          sed "s/- 'semibots.com'/- '$HOST'/g" | \
-          sed "s/secretName: wildcard-semibots-com-tls/secretName: wildcard-semibots-com-tls/g" | \
-          kubectl apply -f -
+          echo "Injecting namespace $NS into manifests"
+          for file in k8s/*.yaml; do
+            # Replace existing namespace or add if not present
+            if grep -q "namespace:" "$file"; then
+              # Replace existing namespace
+              sed -i "s/namespace: .*/namespace: $NS/" "$file"
+            else
+              # Add namespace if not present
+              sed -i "s/^metadata:$/metadata:\n  namespace: $NS/" "$file"
+            fi
+          done
 
-          echo "✅ Deployed preview: http://$HOST"
+          echo "Applying manifests to namespace $NS"
+          kubectl apply -n $NS -f k8s/
+
+          HOST="$NS.semibots.com"
+          echo "Creating ingress for $HOST"
+
+          cat <<EOF | kubectl apply -f -
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: ${NS}-ingress
+            namespace: $NS
+            annotations:
+              cert-manager.io/cluster-issuer: "letsencrypt-dns"
+          spec:
+            ingressClassName: traefik
+            tls:
+            - hosts:
+              - $HOST
+              secretName: ${NS}-tls
+            rules:
+            - host: $HOST
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: frontend-application
+                      port:
+                        number: 3000
+          EOF
+
+          echo "✅ Deployed successfully at https://$HOST"
