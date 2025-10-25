@@ -3,10 +3,13 @@ name: Deploy PR Preview
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    branches: [feature/*]
 
 permissions:
   contents: read
   packages: write
+
+# Environment variables will be set in the build step
 
 jobs:
   deploy-pr:
@@ -27,11 +30,19 @@ jobs:
 
       - name: Build and push PR Docker image
         run: |
-          IMAGE_TAG=pr-${{ github.event.pull_request.number }}
+          # Extract tag from branch name (feature/activation-fee -> activation-fee)
+          BRANCH_NAME="${{ github.head_ref }}"
+          IMAGE_TAG=${BRANCH_NAME#feature/}
           IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}:$IMAGE_TAG" | tr '[:upper:]' '[:lower:]')
+
+          echo "Branch: $BRANCH_NAME"
+          echo "Tag: $IMAGE_TAG"
+          echo "Image: $IMAGE_NAME"
+
           docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
           docker push $IMAGE_NAME
           echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
       - name: Set up kubectl
         run: |
@@ -39,29 +50,28 @@ jobs:
           export KUBECONFIG=kubeconfig
           kubectl config get-contexts
 
-      - name: Deploy PR environment
+      - name: Deploy with Docker Compose
         run: |
-          export KUBECONFIG=kubeconfig
-          NS=pr-${{ github.event.pull_request.number }}
-          HOST=pr-${{ github.event.pull_request.number }}.semibots.com
+          # Navigate to docker-compose directory
+          cd apps/nextjs-app
 
-          kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
+          # Set environment variables for docker-compose
+          export IMAGE_TAG=$IMAGE_TAG
+          export IMAGE_NAME=$IMAGE_NAME
 
-          # Use existing deployment.yaml with namespace and image substitution
-          sed "s/namespace: default/namespace: $NS/g" k8s/deployment.yaml | \
-          sed "s|image: ghcr.io/medotarek73/nextjs-monorepo:latest|image: $IMAGE_NAME|g" | \
-          kubectl apply -f -
+          echo "Deploying with docker-compose..."
+          echo "IMAGE_TAG: $IMAGE_TAG"
+          echo "IMAGE_NAME: $IMAGE_NAME"
 
-          # Use existing service.yaml with namespace substitution
-          sed "s/namespace: default/namespace: $NS/g" k8s/service.yaml | \
-          sed "s/type: LoadBalancer/type: ClusterIP/g" | \
-          kubectl apply -f -
+          # Create .env file for docker-compose
+          echo "IMAGE_TAG=$IMAGE_TAG" > .env
 
-          # Use existing ingress.yaml with namespace and host substitution
-          sed "s/namespace: default/namespace: $NS/g" k8s/ingress.yaml | \
-          sed "s/host: 'semibots.com'/host: '$HOST'/g" | \
-          sed "s/- 'semibots.com'/- '$HOST'/g" | \
-          sed "s/secretName: wildcard-semibots-com-tls/secretName: wildcard-semibots-com-tls/g" | \
-          kubectl apply -f -
+          # Update docker-compose.yml to use the built image
+          sed -i "s|ghcr.io/medotarek73/nextjs-monorepo:\${IMAGE_TAG:-latest}|$IMAGE_NAME|g" docker-compose.yml
 
-          echo "✅ Deployed preview: http://$HOST"
+          # Deploy with docker-compose
+          docker-compose up -d
+
+          echo "✅ Deployed with docker-compose"
+          echo "🌐 Frontend: http://localhost:3000"
+          echo "🔗 Backend API: http://localhost:8080"
