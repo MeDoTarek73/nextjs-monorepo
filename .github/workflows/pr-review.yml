@@ -74,8 +74,16 @@ jobs:
           echo "Converting docker-compose.yml to Kubernetes manifests"
           kompose convert -f apps/nextjs-app/docker-compose.yml -o k8s/
 
-          echo "Applying manifests"
-          kubectl apply -f k8s/ -n $NS
+          echo "Injecting namespace $NS into manifests"
+          for file in k8s/*.yaml; do
+            # Add namespace inside metadata if not present
+            if ! grep -q "namespace:" "$file"; then
+              sed -i "s/^metadata:$/metadata:\n  namespace: $NS/" "$file"
+            fi
+          done
+
+          echo "Applying manifests to namespace $NS"
+          kubectl apply -n $NS -f k8s/
 
           HOST="$NS.semibots.com"
           echo "Creating ingress for $HOST"
