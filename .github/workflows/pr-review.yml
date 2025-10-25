@@ -72,7 +72,17 @@ jobs:
           kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
 
           echo "Converting docker-compose.yml to Kubernetes manifests"
+          # Set IMAGE_TAG environment variable for kompose
+          export IMAGE_TAG=$IMAGE_TAG
           kompose convert -f apps/nextjs-app/docker-compose.yml -o k8s/
+
+          echo "Checking if Java microservice image exists, fallback to latest if not"
+          # Check if the specific Java microservice image exists, if not use latest
+          if ! docker manifest inspect "ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "Java microservice image with tag $IMAGE_TAG not found, using latest"
+            # Update the backend-service deployment to use latest tag
+            sed -i "s|ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG|ghcr.io/medotarek73/java-microservice-api:latest|g" k8s/backend-service-deployment.yaml
+          fi
 
           echo "Injecting namespace $NS into manifests"
           for file in k8s/*.yaml; do
