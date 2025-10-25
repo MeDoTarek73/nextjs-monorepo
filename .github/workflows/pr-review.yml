@@ -39,6 +39,9 @@ jobs:
           echo "Tag: $IMAGE_TAG"
           echo "Image: $IMAGE_NAME"
 
+          export IMAGE_TAG=$IMAGE_TAG
+          export IMAGE_NAME=$IMAGE_NAME
+
           docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
           docker push $IMAGE_NAME
           echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
@@ -50,28 +53,33 @@ jobs:
           export KUBECONFIG=kubeconfig
           kubectl config get-contexts
 
-      - name: Deploy with Docker Compose
+      - name: Deploy to K3s with Docker Compose
         run: |
           # Navigate to docker-compose directory
           cd apps/nextjs-app
 
-          # Set environment variables for docker-compose
-          export IMAGE_TAG=$IMAGE_TAG
-          export IMAGE_NAME=$IMAGE_NAME
-
-          echo "Deploying with docker-compose..."
-          echo "IMAGE_TAG: $IMAGE_TAG"
-          echo "IMAGE_NAME: $IMAGE_NAME"
+          # Extract tag from branch name
+          BRANCH_NAME="${{ github.head_ref }}"
+          IMAGE_TAG=${BRANCH_NAME#feature/}
 
           # Create .env file for docker-compose
           echo "IMAGE_TAG=$IMAGE_TAG" > .env
 
           # Update docker-compose.yml to use the built image
+          IMAGE_NAME="ghcr.io/${{ github.repository }}:$IMAGE_TAG"
           sed -i "s|ghcr.io/medotarek73/nextjs-monorepo:\${IMAGE_TAG:-latest}|$IMAGE_NAME|g" docker-compose.yml
 
-          # Deploy with docker-compose
+          # Deploy with docker-compose on K3s
           docker-compose up -d
 
-          echo "✅ Deployed with docker-compose"
-          echo "🌐 Frontend: http://localhost:3000"
-          echo "🔗 Backend API: http://localhost:8080"
+          # Create ingress for frontend only (backend is internal)
+          HOST="$IMAGE_TAG.semibots.com"
+          kubectl create ingress $IMAGE_TAG-ingress \
+            --class=nginx \
+            --rule="$HOST/*=frontend-application:3000" \
+            --tls=wildcard-semibots-com-tls \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          echo "✅ Deployed to K3s with docker-compose"
+          echo "🌐 Frontend: http://$HOST"
+          echo "🔗 Backend API: Internal only (no public access)"
