@@ -185,6 +185,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       backend-image-tag: ${{ steps.set-output.outputs.backend-image-tag }}
+      backend-branch-name: ${{ steps.set-output.outputs.backend-branch-name }}
 
     steps:
       - name: Set up kubectl
@@ -273,6 +274,7 @@ jobs:
         id: set-output
         run: |
           echo "backend-image-tag=$BACKEND_IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "backend-branch-name=feature/$BACKEND_IMAGE_TAG" >> $GITHUB_OUTPUT
 
   comment-on-pr:
     needs: [build-frontend, deploy-frontend, deploy-backend]
@@ -331,7 +333,7 @@ jobs:
             ### 📋 Deployment Information:
             - **👤 Triggered by:** ${{ github.actor }}
             - **🌿 Frontend Branch:** \`${{ github.head_ref }}\`
-            - **🌿 Backend Branch:** \`${{ needs.deploy-backend.outputs.backend-image-tag }}\`
+             - **🌿 Backend Branch:** \`${{ needs.deploy-backend.outputs.backend-branch-name }}\`
             - **📝 Commit:** \`${{ github.event.pull_request.head.sha }}\`
             - **⏰ Deployed at:** ${new Date().toISOString()}
 
