@@ -5,19 +5,17 @@ import { useState, useEffect } from 'react';
 
 export default function Index() {
   const [apiResponse, setApiResponse] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false);
 
   const callBackendAPI = async () => {
-    setLoading(true);
     try {
-      const response = await fetch(`${process.env.API_URL || 'http://backend-service:8080'}/hello`);
+      const response = await fetch(
+        `${process.env.API_URL || 'http://backend-service:8080'}/hello`
+      );
       const data = await response.text();
       setApiResponse(data);
     } catch (error) {
       setApiResponse('Error calling backend API');
       console.error('API Error:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -60,11 +58,6 @@ export default function Index() {
               </h2>
               <a href="#commands"> What&apos;s next? </a>
             </div>
-            <div className="text-container">
-              <h2>
-                <span>{apiResponse}</span>
-              </h2>
-            </div>
             <div className="logo-container">
               <svg
                 fill="currentColor"
@@ -76,7 +69,11 @@ export default function Index() {
               </svg>
             </div>
           </div>
-
+          <div className="text-container">
+            <h2>
+              <span>{apiResponse}</span>
+            </h2>
+          </div>
           <div id="middle-content">
             <div id="learning-materials" className="rounded shadow">
               <h2>Learning materials</h2>
