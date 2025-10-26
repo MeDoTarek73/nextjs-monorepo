@@ -71,6 +71,14 @@ jobs:
           echo "Creating namespace $NS"
           kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
 
+          echo "Copying GHCR secret to namespace"
+          if kubectl get secret ghcr-secret -n default >/dev/null 2>&1; then
+            kubectl get secret ghcr-secret -n default -o yaml | \
+              sed "s/namespace: default/namespace: $NS/" | kubectl apply -f -
+          else
+            echo "Warning: GHCR secret not found in default namespace"
+          fi
+
           echo "Converting docker-compose.yml to Kubernetes manifests"
           # Set IMAGE_TAG environment variable for kompose
           export IMAGE_TAG=$IMAGE_TAG
@@ -84,7 +92,7 @@ jobs:
             sed -i "s|ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG|ghcr.io/medotarek73/java-microservice-api:latest|g" k8s/backend-service-deployment.yaml
           fi
 
-          echo "Injecting namespace $NS into manifests"
+          echo "Injecting namespace and imagePullSecrets into manifests"
           for file in k8s/*.yaml; do
             # Replace existing namespace or add if not present
             if grep -q "namespace:" "$file"; then
@@ -93,6 +101,11 @@ jobs:
             else
               # Add namespace if not present
               sed -i "s/^metadata:$/metadata:\n  namespace: $NS/" "$file"
+            fi
+
+            # Add imagePullSecrets if not present
+            if grep -q "spec:" "$file" && ! grep -q "imagePullSecrets" "$file"; then
+              sed -i "/spec:/a\\  imagePullSecrets:\\n  - name: ghcr-secret" "$file"
             fi
           done
 
