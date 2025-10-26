@@ -9,6 +9,8 @@ on:
 permissions:
   contents: read
   packages: write
+  issues: write
+  pull-requests: write
 
 jobs:
   build-frontend:
@@ -181,6 +183,8 @@ jobs:
   deploy-backend:
     needs: build-frontend
     runs-on: ubuntu-latest
+    outputs:
+      backend-image-tag: ${{ env.BACKEND_IMAGE_TAG }}
 
     steps:
       - name: Set up kubectl
@@ -264,3 +268,72 @@ jobs:
           EOF
 
           echo "✅ Backend service deployed successfully"
+
+  comment-on-pr:
+    needs: [build-frontend, deploy-frontend, deploy-backend]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            // Delete previous deployment comments
+            for (const comment of comments) {
+              if (comment.body.includes('🚀 Deployment Status')) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id,
+                });
+              }
+            }
+
+            // Get deployment info
+            const frontendImage = `ghcr.io/medotarek73/nextjs-monorepo:${{ needs.build-frontend.outputs.image-tag }}`;
+            const backendImage = `ghcr.io/medotarek73/java-microservice-api:${{ needs.deploy-backend.outputs.backend-image-tag }}`;
+            const namespace = '${{ needs.build-frontend.outputs.namespace }}';
+            const url = `https://${namespace}.semibots.com`;
+
+            // Determine backend image status
+            const backendImageStatus = '${{ needs.deploy-backend.outputs.backend-image-tag }}' === '${{ needs.build-frontend.outputs.image-tag }}'
+              ? '✅ Latest feature branch image'
+              : '⚠️ Using latest tag (feature branch image not found)';
+
+            const commentBody = `## 🚀 Deployment Status
+
+            **✅ Deployment completed successfully!**
+
+            ### 📦 Images Used:
+            - **Frontend:** \`${frontendImage}\`
+            - **Backend:** \`${backendImage}\`
+
+            ### 🌐 Access:
+            - **URL:** ${url}
+            - **Namespace:** \`${namespace}\`
+
+            ### 🔄 Image Status:
+            - **Frontend:** ✅ Latest feature branch image
+            - **Backend:** ${backendImageStatus}
+
+            ### 📋 Deployment Details:
+            - **Triggered by:** ${{ github.actor }}
+            - **Branch:** \`${{ github.head_ref }}\`
+            - **Commit:** \`${{ github.event.pull_request.head.sha }}\`
+
+            ---
+            *Deployed at: ${new Date().toISOString()}*`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: commentBody,
+            });
