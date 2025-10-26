@@ -73,17 +73,14 @@ jobs:
           echo "🧩 Creating namespace $NS"
           kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
 
-          echo "🔐 Copying GHCR secret to namespace"
-          if kubectl get secret ghcr-secret -n default >/dev/null 2>&1; then
-            kubectl get secret ghcr-secret -n default -o yaml | \
-              sed "s/namespace: default/namespace: $NS/" | \
-              sed "/resourceVersion:/d" | \
-              sed "/uid:/d" | \
-              sed "/creationTimestamp:/d" | \
-              kubectl apply -f -
-          else
-            echo "⚠️ GHCR secret not found in default namespace"
-          fi
+          echo "🔐 Creating/Updating GHCR secret in namespace"
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.REGISTRY_PASSWORD }} \
+            --docker-email=${{ github.actor }}@users.noreply.github.com \
+            -n $NS \
+            --dry-run=client -o yaml | kubectl apply -f -
 
           echo "🪪 Patching default ServiceAccount in namespace $NS"
           kubectl patch serviceaccount default -n $NS \
