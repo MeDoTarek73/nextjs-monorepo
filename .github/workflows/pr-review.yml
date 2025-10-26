@@ -133,8 +133,8 @@ jobs:
           kubectl apply -n $NS -f k8s/
 
           echo "Adding imagePullSecrets to deployments"
-          kubectl patch deployment backend-service -n $NS -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-secret"}]}}}}' --ignore-not-found=true
-          kubectl patch deployment frontend-application -n $NS -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-secret"}]}}}}' --ignore-not-found=true
+          kubectl patch deployment backend-service -n $NS -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-secret"}]}}}}' || echo "Backend service deployment not found"
+          kubectl patch deployment frontend-application -n $NS -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-secret"}]}}}}' || echo "Frontend application deployment not found"
 
           HOST="$NS.semibots.com"
           echo "Creating ingress for $HOST"
