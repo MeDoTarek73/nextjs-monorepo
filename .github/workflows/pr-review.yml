@@ -94,8 +94,9 @@ jobs:
 
           echo "🚀 Deploying Frontend Service"
 
-          # Delete existing deployment if it exists
+          # Force delete existing deployment and pods
           kubectl delete deployment frontend-application -n $NS --ignore-not-found=true
+          kubectl delete pods -l app=frontend-application -n $NS --ignore-not-found=true
 
           kubectl apply -f - <<EOF
           apiVersion: apps/v1
@@ -116,6 +117,7 @@ jobs:
                 containers:
                 - name: frontend-application
                   image: ghcr.io/medotarek73/nextjs-monorepo:$IMAGE_TAG
+                  imagePullPolicy: Always
                   ports:
                   - containerPort: 3000
                   env:
