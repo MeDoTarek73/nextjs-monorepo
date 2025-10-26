@@ -96,6 +96,10 @@ jobs:
           IMAGE_TAG=${{ needs.build-frontend.outputs.image-tag }}
 
           echo "🚀 Deploying Frontend Service"
+
+          # Delete existing deployment if it exists
+          kubectl delete deployment frontend-application -n $NS --ignore-not-found=true
+
           kubectl apply -f - <<EOF
           apiVersion: apps/v1
           kind: Deployment
@@ -213,6 +217,10 @@ jobs:
           NS=${{ needs.build-frontend.outputs.namespace }}
 
           echo "🚀 Deploying Backend Service"
+
+          # Delete existing deployment if it exists
+          kubectl delete deployment backend-service -n $NS --ignore-not-found=true
+
           kubectl apply -f - <<EOF
           apiVersion: apps/v1
           kind: Deployment
