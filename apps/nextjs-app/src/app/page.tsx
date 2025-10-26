@@ -1,27 +1,8 @@
-'use client';
-
 import styles from './page.module.css';
-import { useState, useEffect } from 'react';
+import { getBackendData } from './actions';
 
-export default function Index() {
-  const [apiResponse, setApiResponse] = useState<string>('');
-
-  const callBackendAPI = async () => {
-    try {
-      const response = await fetch(
-        `${process.env.API_URL || 'http://localhost:8080'}/hello`
-      );
-      const data = await response.text();
-      setApiResponse(data);
-    } catch (error) {
-      setApiResponse('Error calling backend API');
-      console.error('API Error:', error);
-    }
-  };
-
-  useEffect(() => {
-    callBackendAPI();
-  }, []);
+export default async function Index() {
+  const apiResponse = await getBackendData();
   /*
    * Replace the elements below with your own.
    *
