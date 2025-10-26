@@ -38,17 +38,17 @@ export default function Index() {
               <span> Hello there, </span>
               Welcome 👋
             </h1>
-            
+
             {/* Backend API Call Section */}
-            <div style={{ 
-              marginTop: '20px', 
-              padding: '20px', 
-              backgroundColor: '#f8f9fa', 
+            <div style={{
+              marginTop: '20px',
+              padding: '20px',
+              backgroundColor: '#f8f9fa',
               borderRadius: '8px',
               border: '1px solid #e9ecef'
             }}>
               <h3>Backend API Test</h3>
-              <button 
+              <button
                 onClick={callBackendAPI}
                 disabled={loading}
                 style={{
@@ -63,10 +63,10 @@ export default function Index() {
               >
                 {loading ? 'Calling API...' : 'Call /hello API'}
               </button>
-              
-              <div style={{ 
-                padding: '10px', 
-                backgroundColor: 'white', 
+
+              <div style={{
+                padding: '10px',
+                backgroundColor: 'white',
                 borderRadius: '4px',
                 border: '1px solid #dee2e6',
                 fontFamily: 'monospace'
