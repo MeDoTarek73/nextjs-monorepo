@@ -96,6 +96,18 @@ jobs:
             fi
           done
 
+          echo "Deleting existing resources to avoid conflicts"
+          kubectl delete deployment backend-service -n $NS --ignore-not-found=true
+          kubectl delete deployment frontend-application -n $NS --ignore-not-found=true
+          kubectl delete deployment nextjs-app -n $NS --ignore-not-found=true
+          kubectl delete service backend-service -n $NS --ignore-not-found=true
+          kubectl delete service frontend-application -n $NS --ignore-not-found=true
+          kubectl delete service nextjs-service -n $NS --ignore-not-found=true
+          kubectl delete ingress nextjs-ingress -n $NS --ignore-not-found=true
+
+          echo "Waiting for resources to be fully deleted"
+          sleep 5
+
           echo "Applying manifests to namespace $NS"
           kubectl apply -n $NS -f k8s/
 
