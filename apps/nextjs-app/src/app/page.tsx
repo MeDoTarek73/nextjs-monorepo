@@ -1,8 +1,29 @@
-import styles from './page.module.css';
-import { getBackendData } from './actions';
+'use client';
 
-export default async function Index() {
-  const apiResponse = await getBackendData();
+import styles from './page.module.css';
+import { useState, useEffect } from 'react';
+
+export default function Index() {
+  const [apiResponse, setApiResponse] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const callBackendAPI = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/hello');
+      const data = await response.json();
+      setApiResponse(data.message || 'No response');
+    } catch (error) {
+      setApiResponse('Error calling backend API');
+      console.error('API Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    callBackendAPI();
+  }, []);
   /*
    * Replace the elements below with your own.
    *
@@ -17,6 +38,42 @@ export default async function Index() {
               <span> Hello there, </span>
               Welcome Ya basha 👋
             </h1>
+
+            {/* Backend API Call Section */}
+            <div style={{
+              marginTop: '20px',
+              padding: '20px',
+              backgroundColor: '#f8f9fa',
+              borderRadius: '8px',
+              border: '1px solid #e9ecef'
+            }}>
+              <h3>Backend API Test</h3>
+              <button
+                onClick={callBackendAPI}
+                disabled={loading}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#007bff',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  marginBottom: '10px'
+                }}
+              >
+                {loading ? 'Calling API...' : 'Call /hello API'}
+              </button>
+
+              <div style={{
+                padding: '10px',
+                backgroundColor: 'white',
+                borderRadius: '4px',
+                border: '1px solid #dee2e6',
+                fontFamily: 'monospace'
+              }}>
+                <strong>API Response:</strong> {apiResponse || 'No response yet'}
+              </div>
+            </div>
           </div>
 
           <div id="hero" className="rounded">
