@@ -73,8 +73,16 @@ jobs:
 
           echo "Copying GHCR secret to namespace"
           if kubectl get secret ghcr-secret -n default >/dev/null 2>&1; then
-            kubectl get secret ghcr-secret -n default -o yaml | \
-              sed "s/namespace: default/namespace: $NS/" | kubectl apply -f -
+            if kubectl get secret ghcr-secret -n $NS >/dev/null 2>&1; then
+              echo "GHCR secret already exists in namespace $NS"
+            else
+              kubectl get secret ghcr-secret -n default -o yaml | \
+                sed "s/namespace: default/namespace: $NS/" | \
+                sed "/resourceVersion:/d" | \
+                sed "/uid:/d" | \
+                sed "/creationTimestamp:/d" | \
+                kubectl apply -f -
+            fi
           else
             echo "Warning: GHCR secret not found in default namespace"
           fi
