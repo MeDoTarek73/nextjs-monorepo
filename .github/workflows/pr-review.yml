@@ -22,12 +22,13 @@ jobs:
             echo "❌ Not a feature branch ($BRANCH_NAME)"
             exit 0
           fi
+
       - name: Checkout code
         uses: actions/checkout@v3
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Install kompose
+      - name: Install Kompose
         run: |
           curl -L https://github.com/kubernetes/kompose/releases/download/v1.31.2/kompose-linux-amd64 -o kompose
           chmod +x kompose
@@ -40,7 +41,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Build and push PR Docker image
+      - name: Build and push PR Docker image (Next.js)
         run: |
           BRANCH_NAME="${{ github.head_ref }}"
           IMAGE_TAG=${BRANCH_NAME#feature/}
@@ -48,7 +49,7 @@ jobs:
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_NAME="ghcr.io/$REPO_NAME:$IMAGE_TAG"
 
-          echo "Building image $IMAGE_NAME"
+          echo "🛠️ Building image $IMAGE_NAME"
           docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
           docker push $IMAGE_NAME
 
@@ -61,83 +62,58 @@ jobs:
           export KUBECONFIG=kubeconfig
           kubectl config get-contexts
 
-      - name: Deploy PR environment
+      - name: Prepare namespace and GHCR access
         run: |
           export KUBECONFIG=kubeconfig
-
           NS=${{ github.head_ref }}
           NS=${NS#feature/}
           NS=$(echo $NS | tr '[:upper:]' '[:lower:]')
-          echo "Creating namespace $NS"
+          echo "🧩 Creating namespace $NS"
           kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
 
-          echo "Copying GHCR secret to namespace"
+          echo "🔐 Copying GHCR secret to namespace"
           if kubectl get secret ghcr-secret -n default >/dev/null 2>&1; then
-            if kubectl get secret ghcr-secret -n $NS >/dev/null 2>&1; then
-              echo "GHCR secret already exists in namespace $NS"
-            else
-              kubectl get secret ghcr-secret -n default -o yaml | \
-                sed "s/namespace: default/namespace: $NS/" | \
-                sed "/resourceVersion:/d" | \
-                sed "/uid:/d" | \
-                sed "/creationTimestamp:/d" | \
-                kubectl apply -f -
-            fi
+            kubectl get secret ghcr-secret -n default -o yaml | \
+              sed "s/namespace: default/namespace: $NS/" | \
+              sed "/resourceVersion:/d" | \
+              sed "/uid:/d" | \
+              sed "/creationTimestamp:/d" | \
+              kubectl apply -f -
           else
-            echo "Warning: GHCR secret not found in default namespace"
+            echo "⚠️ GHCR secret not found in default namespace"
           fi
 
-          echo "Converting docker-compose.yml to Kubernetes manifests"
-          # Clean existing k8s directory
+          echo "🪪 Patching default ServiceAccount in namespace $NS"
+          kubectl patch serviceaccount default -n $NS \
+            -p '{"imagePullSecrets": [{"name": "ghcr-secret"}]}'
+
+      - name: Deploy PR environment
+        run: |
+          export KUBECONFIG=kubeconfig
+          NS=${{ github.head_ref }}
+          NS=${NS#feature/}
+          NS=$(echo $NS | tr '[:upper:]' '[:lower:]')
+
+          echo "🧱 Converting docker-compose.yml to Kubernetes manifests"
           rm -rf k8s/
           mkdir -p k8s/
-
-          # Set IMAGE_TAG environment variable for kompose
           export IMAGE_TAG=$IMAGE_TAG
           kompose convert -f apps/nextjs-app/docker-compose.yml -o k8s/
 
-          echo "Checking if Java microservice image exists, fallback to latest if not"
-          # Check if the specific Java microservice image exists, if not use latest
-          if ! docker manifest inspect "ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG" >/dev/null 2>&1; then
-            echo "Java microservice image with tag $IMAGE_TAG not found, using latest"
-            # Update the backend-service deployment to use latest tag
-            sed -i "s|ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG|ghcr.io/medotarek73/java-microservice-api:latest|g" k8s/backend-service-deployment.yaml
-          fi
-
-          echo "Injecting namespace and imagePullSecrets into manifests"
+          echo "🧩 Injecting namespace into manifests"
           for file in k8s/*.yaml; do
-            # Replace existing namespace or add if not present
             if grep -q "namespace:" "$file"; then
-              # Replace existing namespace
               sed -i "s/namespace: .*/namespace: $NS/" "$file"
             else
-              # Add namespace if not present
               sed -i "s/^metadata:$/metadata:\n  namespace: $NS/" "$file"
             fi
-
           done
 
-          echo "Deleting existing resources to avoid conflicts"
-          kubectl delete deployment backend-service -n $NS --ignore-not-found=true
-          kubectl delete deployment frontend-application -n $NS --ignore-not-found=true
-          kubectl delete deployment nextjs-app -n $NS --ignore-not-found=true
-          kubectl delete service backend-service -n $NS --ignore-not-found=true
-          kubectl delete service frontend-application -n $NS --ignore-not-found=true
-          kubectl delete service nextjs-service -n $NS --ignore-not-found=true
-          kubectl delete ingress nextjs-ingress -n $NS --ignore-not-found=true
-
-          echo "Waiting for resources to be fully deleted"
-          sleep 5
-
-          echo "Applying manifests to namespace $NS"
+          echo "🚀 Applying manifests to namespace $NS"
           kubectl apply -n $NS -f k8s/
 
-          echo "Adding imagePullSecrets to deployments"
-          kubectl patch deployment backend-service -n $NS -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-secret"}]}}}}' || echo "Backend service deployment not found"
-          kubectl patch deployment frontend-application -n $NS -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-secret"}]}}}}' || echo "Frontend application deployment not found"
-
           HOST="$NS.semibots.com"
-          echo "Creating ingress for $HOST"
+          echo "🌐 Creating ingress for $HOST"
 
           cat <<EOF | kubectl apply -f -
           apiVersion: networking.k8s.io/v1
