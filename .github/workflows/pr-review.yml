@@ -330,7 +330,8 @@ jobs:
 
             ### 📋 Deployment Information:
             - **👤 Triggered by:** ${{ github.actor }}
-            - **🌿 Branch:** \`${{ github.head_ref }}\`
+            - **🌿 Frontend Branch:** \`${{ github.head_ref }}\`
+            - **🌿 Backend Branch:** \`${{ needs.deploy-backend.outputs.backend-image-tag }}\`
             - **📝 Commit:** \`${{ github.event.pull_request.head.sha }}\`
             - **⏰ Deployed at:** ${new Date().toISOString()}
 
