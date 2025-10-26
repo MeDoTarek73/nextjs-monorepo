@@ -88,6 +88,10 @@ jobs:
           fi
 
           echo "Converting docker-compose.yml to Kubernetes manifests"
+          # Clean existing k8s directory
+          rm -rf k8s/
+          mkdir -p k8s/
+
           # Set IMAGE_TAG environment variable for kompose
           export IMAGE_TAG=$IMAGE_TAG
           kompose convert -f apps/nextjs-app/docker-compose.yml -o k8s/
@@ -111,8 +115,8 @@ jobs:
               sed -i "s/^metadata:$/metadata:\n  namespace: $NS/" "$file"
             fi
 
-            # Add imagePullSecrets if not present
-            if grep -q "spec:" "$file" && ! grep -q "imagePullSecrets" "$file"; then
+            # Add imagePullSecrets only to Deployment manifests
+            if [[ "$file" == *"deployment.yaml" ]] && grep -q "spec:" "$file" && ! grep -q "imagePullSecrets" "$file"; then
               sed -i "/spec:/a\\  imagePullSecrets:\\n  - name: ghcr-secret" "$file"
             fi
           done
