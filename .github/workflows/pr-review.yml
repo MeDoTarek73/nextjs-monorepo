@@ -115,10 +115,6 @@ jobs:
               sed -i "s/^metadata:$/metadata:\n  namespace: $NS/" "$file"
             fi
 
-            # Add imagePullSecrets only to Deployment manifests
-            if [[ "$file" == *"deployment.yaml" ]] && grep -q "spec:" "$file" && ! grep -q "imagePullSecrets" "$file"; then
-              sed -i "/spec:/a\\  imagePullSecrets:\\n  - name: ghcr-secret" "$file"
-            fi
           done
 
           echo "Deleting existing resources to avoid conflicts"
@@ -135,6 +131,10 @@ jobs:
 
           echo "Applying manifests to namespace $NS"
           kubectl apply -n $NS -f k8s/
+
+          echo "Adding imagePullSecrets to deployments"
+          kubectl patch deployment backend-service -n $NS -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-secret"}]}}}}' --ignore-not-found=true
+          kubectl patch deployment frontend-application -n $NS -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-secret"}]}}}}' --ignore-not-found=true
 
           HOST="$NS.semibots.com"
           echo "Creating ingress for $HOST"
