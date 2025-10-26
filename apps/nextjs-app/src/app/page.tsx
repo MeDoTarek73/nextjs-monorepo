@@ -9,7 +9,7 @@ export default function Index() {
   const callBackendAPI = async () => {
     try {
       const response = await fetch(
-        `${process.env.API_URL || 'http://backend-service:8080'}/hello`
+        `${process.env.API_URL || 'http://localhost:8080'}/hello`
       );
       const data = await response.text();
       setApiResponse(data);
