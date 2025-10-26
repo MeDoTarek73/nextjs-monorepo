@@ -11,8 +11,11 @@ permissions:
   packages: write
 
 jobs:
-  deploy-pr:
+  build-frontend:
     runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.build.outputs.image-tag }}
+      namespace: ${{ steps.build.outputs.namespace }}
 
     steps:
       - name: Check branch prefix
@@ -28,12 +31,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Install Kompose
-        run: |
-          curl -L https://github.com/kubernetes/kompose/releases/download/v1.31.2/kompose-linux-amd64 -o kompose
-          chmod +x kompose
-          sudo mv kompose /usr/local/bin/
-
       - name: Log in to GHCR
         uses: docker/login-action@v2
         with:
@@ -41,7 +38,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Build and push PR Docker image (Next.js)
+      - name: Build and push Frontend image
+        id: build
         run: |
           BRANCH_NAME="${{ github.head_ref }}"
           IMAGE_TAG=${BRANCH_NAME#feature/}
@@ -49,13 +47,18 @@ jobs:
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_NAME="ghcr.io/$REPO_NAME:$IMAGE_TAG"
 
-          echo "🛠️ Building image $IMAGE_NAME"
+          echo "🛠️ Building Frontend image $IMAGE_NAME"
           docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
           docker push $IMAGE_NAME
 
-          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "namespace=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
+  deploy-frontend:
+    needs: build-frontend
+    runs-on: ubuntu-latest
+
+    steps:
       - name: Set up kubectl
         run: |
           echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
@@ -65,9 +68,8 @@ jobs:
       - name: Prepare namespace and GHCR access
         run: |
           export KUBECONFIG=kubeconfig
-          NS=${{ github.head_ref }}
-          NS=${NS#feature/}
-          NS=$(echo $NS | tr '[:upper:]' '[:lower:]')
+          NS=${{ needs.build-frontend.outputs.namespace }}
+
           echo "🧩 Creating namespace $NS"
           kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
 
@@ -87,35 +89,64 @@ jobs:
           kubectl patch serviceaccount default -n $NS \
             -p '{"imagePullSecrets": [{"name": "ghcr-secret"}]}'
 
-      - name: Deploy PR environment
+      - name: Deploy Frontend Service
         run: |
           export KUBECONFIG=kubeconfig
-          NS=${{ github.head_ref }}
-          NS=${NS#feature/}
-          NS=$(echo $NS | tr '[:upper:]' '[:lower:]')
+          NS=${{ needs.build-frontend.outputs.namespace }}
+          IMAGE_TAG=${{ needs.build-frontend.outputs.image-tag }}
 
-          echo "🧱 Converting docker-compose.yml to Kubernetes manifests"
-          rm -rf k8s/
-          mkdir -p k8s/
-          export IMAGE_TAG=$IMAGE_TAG
-          kompose convert -f apps/nextjs-app/docker-compose.yml -o k8s/
+          echo "🚀 Deploying Frontend Service"
+          kubectl apply -f - <<EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: frontend-application
+            namespace: $NS
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: frontend-application
+            template:
+              metadata:
+                labels:
+                  app: frontend-application
+              spec:
+                containers:
+                - name: frontend-application
+                  image: ghcr.io/medotarek73/nextjs-monorepo:$IMAGE_TAG
+                  ports:
+                  - containerPort: 3000
+                  env:
+                  - name: NODE_ENV
+                    value: "production"
+                  - name: API_URL
+                    value: "http://backend-service:8080"
+                imagePullSecrets:
+                - name: ghcr-secret
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: frontend-application
+            namespace: $NS
+          spec:
+            selector:
+              app: frontend-application
+            ports:
+            - port: 3000
+              targetPort: 3000
+          EOF
 
-          echo "🧩 Injecting namespace into manifests"
-          for file in k8s/*.yaml; do
-            if grep -q "namespace:" "$file"; then
-              sed -i "s/namespace: .*/namespace: $NS/" "$file"
-            else
-              sed -i "s/^metadata:$/metadata:\n  namespace: $NS/" "$file"
-            fi
-          done
-
-          echo "🚀 Applying manifests to namespace $NS"
-          kubectl apply -n $NS -f k8s/
+      - name: Create Ingress
+        run: |
+          export KUBECONFIG=kubeconfig
+          NS=${{ needs.build-frontend.outputs.namespace }}
 
           HOST="$NS.semibots.com"
           echo "🌐 Creating ingress for $HOST"
 
-          cat <<EOF | kubectl apply -f -
+          kubectl apply -f - <<EOF
           apiVersion: networking.k8s.io/v1
           kind: Ingress
           metadata:
@@ -142,4 +173,86 @@ jobs:
                         number: 3000
           EOF
 
-          echo "✅ Deployed successfully at https://$HOST"
+          echo "✅ Frontend deployed successfully at https://$HOST"
+
+  deploy-backend:
+    needs: build-frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
+          export KUBECONFIG=kubeconfig
+          kubectl config get-contexts
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Check Java microservice image availability
+        run: |
+          export KUBECONFIG=kubeconfig
+          IMAGE_TAG=${{ needs.build-frontend.outputs.image-tag }}
+
+          echo "🔍 Checking Java microservice image availability"
+          if docker manifest inspect "ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "✅ Java microservice image with tag $IMAGE_TAG found"
+            echo "BACKEND_IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          else
+            echo "⚠️ Java microservice image with tag $IMAGE_TAG not found, using latest"
+            echo "BACKEND_IMAGE_TAG=latest" >> $GITHUB_ENV
+          fi
+
+      - name: Deploy Backend Service
+        run: |
+          export KUBECONFIG=kubeconfig
+          NS=${{ needs.build-frontend.outputs.namespace }}
+
+          echo "🚀 Deploying Backend Service"
+          kubectl apply -f - <<EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: backend-service
+            namespace: $NS
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: backend-service
+            template:
+              metadata:
+                labels:
+                  app: backend-service
+              spec:
+                containers:
+                - name: backend-service
+                  image: ghcr.io/medotarek73/java-microservice-api:$BACKEND_IMAGE_TAG
+                  ports:
+                  - containerPort: 8080
+                  env:
+                  - name: QUARKUS_HTTP_HOST
+                    value: "0.0.0.0"
+                  - name: QUARKUS_HTTP_PORT
+                    value: "8080"
+                imagePullSecrets:
+                - name: ghcr-secret
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: backend-service
+            namespace: $NS
+          spec:
+            selector:
+              app: backend-service
+            ports:
+            - port: 8080
+              targetPort: 8080
+          EOF
+
+          echo "✅ Backend service deployed successfully"
