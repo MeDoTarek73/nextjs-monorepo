@@ -239,6 +239,7 @@ jobs:
                 containers:
                 - name: backend-service
                   image: ghcr.io/medotarek73/java-microservice-api:$BACKEND_IMAGE_TAG
+                  imagePullPolicy: Always
                   ports:
                   - containerPort: 8080
                   env:
