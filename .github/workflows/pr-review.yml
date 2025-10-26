@@ -184,7 +184,7 @@ jobs:
     needs: build-frontend
     runs-on: ubuntu-latest
     outputs:
-      backend-image-tag: ${{ env.BACKEND_IMAGE_TAG }}
+      backend-image-tag: ${{ steps.set-output.outputs.backend-image-tag }}
 
     steps:
       - name: Set up kubectl
@@ -269,6 +269,11 @@ jobs:
 
           echo "✅ Backend service deployed successfully"
 
+      - name: Set output for comment job
+        id: set-output
+        run: |
+          echo "backend-image-tag=$BACKEND_IMAGE_TAG" >> $GITHUB_OUTPUT
+
   comment-on-pr:
     needs: [build-frontend, deploy-frontend, deploy-backend]
     runs-on: ubuntu-latest
@@ -287,7 +292,7 @@ jobs:
 
             // Delete previous deployment comments
             for (const comment of comments) {
-              if (comment.body.includes('🚀 Deployment Status')) {
+              if (comment.body.includes('🚀 Review App Launched')) {
                 await github.rest.issues.deleteComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -304,32 +309,33 @@ jobs:
 
             // Determine backend image status
             const backendImageStatus = '${{ needs.deploy-backend.outputs.backend-image-tag }}' === '${{ needs.build-frontend.outputs.image-tag }}'
-              ? '✅ Latest feature branch image'
-              : '⚠️ Using latest tag (feature branch image not found)';
+              ? 'Latest feature branch package deployed'
+              : 'Using latest tag (feature branch package not found)';
 
-            const commentBody = `## 🚀 Deployment Status
+            const commentBody = `## 🚀 Review App Launched
 
-            **✅ Deployment completed successfully!**
+            **✅ PR Preview Environment Successfully Deployed!**
 
-            ### 📦 Images Used:
-            - **Frontend:** \`${frontendImage}\`
-            - **Backend:** \`${backendImage}\`
+            ### 📦 Packages Deployed:
+            - **Frontend Package:** \`${frontendImage}\`
+            - **Backend Package:** \`${backendImage}\`
 
-            ### 🌐 Access:
-            - **URL:** ${url}
-            - **Namespace:** \`${namespace}\`
+            ### 🌐 Review App Access:
+            - **🔗 Live URL:** ${url}
+            - **📁 Kubernetes Namespace:** \`${namespace}\`
 
-            ### 🔄 Image Status:
-            - **Frontend:** ✅ Latest feature branch image
-            - **Backend:** ${backendImageStatus}
+            ### 🔄 Package Status:
+            - **Frontend:** ✅ Latest feature branch package deployed
+            - **Backend:**  ✅ ${backendImageStatus}
 
-            ### 📋 Deployment Details:
-            - **Triggered by:** ${{ github.actor }}
-            - **Branch:** \`${{ github.head_ref }}\`
-            - **Commit:** \`${{ github.event.pull_request.head.sha }}\`
+            ### 📋 Deployment Information:
+            - **👤 Triggered by:** ${{ github.actor }}
+            - **🌿 Branch:** \`${{ github.head_ref }}\`
+            - **📝 Commit:** \`${{ github.event.pull_request.head.sha }}\`
+            - **⏰ Deployed at:** ${new Date().toISOString()}
 
             ---
-            *Deployed at: ${new Date().toISOString()}*`;
+            **🎉 Your review app is ready for testing!**`;
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
