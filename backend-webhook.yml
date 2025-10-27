@@ -1,0 +1,45 @@
+name: Trigger Frontend Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - feature/*
+    paths:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  trigger-frontend-deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if frontend PR exists
+        id: check-pr
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+
+          # If pushing to main, check for any open PRs
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            echo "branch_pattern=*" >> $GITHUB_OUTPUT
+            echo "trigger_reason=main branch updated" >> $GITHUB_OUTPUT
+          else
+            # If pushing to feature branch, check for specific PR
+            echo "branch_pattern=$BRANCH_NAME" >> $GITHUB_OUTPUT
+            echo "trigger_reason=feature branch $BRANCH_NAME updated" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger frontend deployment
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
+          repository: MeDoTarek73/nextjs-monorepo
+          event-type: backend-updated
+          client-payload: |
+            {
+              "backend_repo": "${{ github.repository }}",
+              "backend_ref": "${{ github.ref }}",
+              "backend_sha": "${{ github.sha }}",
+              "backend_branch": "${{ github.ref_name }}",
+              "trigger_reason": "${{ steps.check-pr.outputs.trigger_reason }}",
+              "triggered_by": "${{ github.actor }}"
+            }
