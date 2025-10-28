@@ -29,32 +29,27 @@ jobs:
       - name: Build and push Docker image
         run: |
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "Building image: ghcr.io/$REPO_NAME:latest"
+          echo "🛠️ Building image: ghcr.io/$REPO_NAME:latest"
 
           docker buildx build \
             --platform linux/amd64 \
             --file apps/nextjs-app/Dockerfile \
             --tag ghcr.io/$REPO_NAME:latest \
             --tag ghcr.io/$REPO_NAME:${{ github.sha }} \
-            --no-cache \
             --push .
-          
-          # Verify image was pushed successfully
-          echo "Verifying image push..."
-          docker manifest inspect ghcr.io/$REPO_NAME:latest
+
       - name: Deploy to k3s
         run: |
           echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
           export KUBECONFIG=kubeconfig
-          
-          # Apply deployment
+
+          echo "🚀 Applying deployment to cluster..."
           kubectl apply -f k8s/deployment.yaml
-          
-          # Force restart deployment to ensure latest image is pulled
+
+          echo "🔁 Forcing pod restart to ensure latest image is pulled..."
           kubectl rollout restart deployment/nextjs-app
-          
-          # Wait for rollout to complete
+
+          echo "⏳ Waiting for rollout to complete..."
           kubectl rollout status deployment/nextjs-app --timeout=300s
-          
-          # Verify the deployment is using the latest image
-          kubectl get deployment nextjs-app -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+          echo "✅ Deployment complete!"
