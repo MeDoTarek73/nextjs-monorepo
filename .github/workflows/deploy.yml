@@ -36,10 +36,25 @@ jobs:
             --file apps/nextjs-app/Dockerfile \
             --tag ghcr.io/$REPO_NAME:latest \
             --tag ghcr.io/$REPO_NAME:${{ github.sha }} \
+            --no-cache \
             --push .
+          
+          # Verify image was pushed successfully
+          echo "Verifying image push..."
+          docker manifest inspect ghcr.io/$REPO_NAME:latest
       - name: Deploy to k3s
         run: |
           echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
           export KUBECONFIG=kubeconfig
+          
+          # Apply deployment
           kubectl apply -f k8s/deployment.yaml
-          kubectl rollout status deployment/nextjs-app
+          
+          # Force restart deployment to ensure latest image is pulled
+          kubectl rollout restart deployment/nextjs-app
+          
+          # Wait for rollout to complete
+          kubectl rollout status deployment/nextjs-app --timeout=300s
+          
+          # Verify the deployment is using the latest image
+          kubectl get deployment nextjs-app -o jsonpath='{.spec.template.spec.containers[0].image}'
