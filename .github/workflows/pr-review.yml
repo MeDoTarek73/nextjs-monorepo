@@ -39,6 +39,7 @@ jobs:
           if [[ $BRANCH_NAME != feature/* ]]; then
             echo "❌ Not a feature branch"
             exit 1
+          fi
 
           RAW_NAME=${BRANCH_NAME#feature/}
           NS=$(echo "$RAW_NAME" \
@@ -52,6 +53,7 @@ jobs:
           if ! [[ $NS =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
             echo "❌ Invalid DNS-compatible namespace: $NS"
             exit 1
+          fi
 
           echo "Normalized namespace: $NS"
           IMAGE_TAG=$NS
