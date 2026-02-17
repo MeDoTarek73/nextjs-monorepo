@@ -39,7 +39,6 @@ jobs:
           if [[ $BRANCH_NAME != feature/* ]]; then
             echo "❌ Not a feature branch"
             exit 1
-          fi
 
           RAW_NAME=${BRANCH_NAME#feature/}
           NS=$(echo "$RAW_NAME" \
@@ -53,7 +52,6 @@ jobs:
           if ! [[ $NS =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
             echo "❌ Invalid DNS-compatible namespace: $NS"
             exit 1
-          fi
 
           echo "Normalized namespace: $NS"
           IMAGE_TAG=$NS
@@ -73,7 +71,7 @@ jobs:
 
   deploy-frontend:
     needs: build-frontend
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Set up kubectl
         run: |
@@ -89,7 +87,6 @@ jobs:
             kubectl create namespace $NS
           else
             echo "📝 Namespace $NS already exists — updating deployments"
-          fi
 
       - name: Prepare GHCR access
         run: |
@@ -127,18 +124,18 @@ jobs:
                   app: frontend-application
               spec:
                 containers:
-                - name: frontend-application
-                  image: ghcr.io/medotarek73/nextjs-monorepo:$IMAGE_TAG
-                  imagePullPolicy: Always
-                  ports:
-                  - containerPort: 3000
-                  env:
-                  - name: NODE_ENV
-                    value: "production"
-                  - name: API_URL
-                    value: "http://backend-service:8080"
+                  - name: frontend-application
+                    image: ghcr.io/medotarek73/nextjs-monorepo:$IMAGE_TAG
+                    imagePullPolicy: Always
+                    ports:
+                      - containerPort: 3000
+                    env:
+                      - name: NODE_ENV
+                        value: "production"
+                      - name: API_URL
+                        value: "http://backend-service:8080"
                 imagePullSecrets:
-                - name: ghcr-secret
+                  - name: ghcr-secret
           ---
           apiVersion: v1
           kind: Service
@@ -149,8 +146,8 @@ jobs:
             selector:
               app: frontend-application
             ports:
-            - port: 3000
-              targetPort: 3000
+              - port: 3000
+                targetPort: 3000
           EOF
           kubectl rollout restart deployment frontend-application -n $NS
 
@@ -186,9 +183,76 @@ jobs:
                             number: 3000
           EOF
 
+      - name: Deploy Wake-on-Request sidecar
+        run: |
+          NS=${{ needs.build-frontend.outputs.namespace }}
+          kubectl apply -f - <<EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: frontend-wakeup
+            namespace: $NS
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: frontend-wakeup
+            template:
+              metadata:
+                labels:
+                  app: frontend-wakeup
+              spec:
+                containers:
+                  - name: wakeup
+                    image: bitnami/kubectl:latest
+                    env:
+                      - name: TARGET_DEPLOYMENT
+                        value: "frontend-application"
+                      - name: TARGET_NAMESPACE
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
+                    command:
+                      - sh
+                      - -c
+                      - |
+                        while true; do
+                          nc -l -p 8081 -c "echo 'Waking up pod...'; kubectl scale deployment \$TARGET_DEPLOYMENT -n \$TARGET_NAMESPACE --replicas=1";
+                        done
+          EOF
+
+      - name: Deploy Idle Shutdown CronJob
+        run: |
+          NS=${{ needs.build-frontend.outputs.namespace }}
+          kubectl apply -f - <<EOF
+          apiVersion: batch/v1
+          kind: CronJob
+          metadata:
+            name: scale-down-idle-frontend
+            namespace: $NS
+          spec:
+            schedule: "*/30 * * * *"
+            jobTemplate:
+              spec:
+                template:
+                  spec:
+                    containers:
+                    - name: scale-down
+                      image: bitnami/kubectl:latest
+                      command:
+                        - sh
+                        - -c
+                        - |
+                          if [ $(kubectl get deployment frontend-application -n $NS -o jsonpath='{.status.readyReplicas}') -eq 1 ]; then
+                            echo "Scaling frontend down to 0 due to idle"
+                            kubectl scale deployment frontend-application -n $NS --replicas=0
+                          fi
+                    restartPolicy: OnFailure
+          EOF
+
   deploy-backend:
     needs: build-frontend
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       backend-image-tag: ${{ steps.set-output.outputs.backend-image-tag }}
       backend-branch-name: ${{ steps.set-output.outputs.backend-branch-name }}
@@ -285,7 +349,6 @@ jobs:
               issue_number: context.issue.number,
             });
 
-            // Delete previous deployment comments
             for (const comment of comments) {
               if (comment.body.includes('🚀 Review App Launched')) {
                 await github.rest.issues.deleteComment({
