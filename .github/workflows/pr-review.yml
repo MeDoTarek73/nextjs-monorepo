@@ -60,7 +60,11 @@ jobs:
 
           echo "namespace=$NS" >> $GITHUB_OUTPUT
           echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-
+      - name: Set outputs for other steps
+        id: set-outputs
+        run: |
+          echo "namespace=${{ steps.validate.outputs.namespace }}" >> $GITHUB_OUTPUT
+          echo "image-tag=${{ steps.validate.outputs.image-tag }}" >> $GITHUB_OUTPUT
       - name: Build and push Frontend image
         run: |
           IMAGE_TAG=${{ steps.validate.outputs.image-tag }}
@@ -73,15 +77,8 @@ jobs:
 
   deploy-services:
     needs: build-frontend
-    runs-on: self-hosted
-    env:
-      KUBECONFIG: ${{ github.workspace }}/kubeconfig
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-
       - name: Set up kubectl
         run: |
           echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
@@ -95,7 +92,8 @@ jobs:
             echo "🧩 Creating namespace $NS"
             kubectl create namespace $NS
           else
-            echo "📝 Namespace $NS already exists — updating deployments"
+            echo "📝 Namespace $NS exists — updating deployments"
+          fi
 
       - name: Prepare GHCR access
         run: |
@@ -110,13 +108,13 @@ jobs:
           kubectl patch serviceaccount default -n $NS \
             -p '{"imagePullSecrets": [{"name": "ghcr-secret"}]}'
 
-      - name: Deploy Frontend & Backend
+      - name: Deploy Frontend Service + Wake-on-request sidecar
         run: |
           NS=${{ needs.build-frontend.outputs.namespace }}
           IMAGE_TAG=${{ needs.build-frontend.outputs.image-tag }}
 
-          # Frontend Deployment
-          kubectl apply -f - <<EOF
+          echo "🚀 Deploying/Updating Frontend Service with wake-on-request"
+          sed 's/^          //' <<EOF | kubectl apply -f -
           apiVersion: apps/v1
           kind: Deployment
           metadata:
@@ -143,6 +141,15 @@ jobs:
                         value: "production"
                       - name: API_URL
                         value: "http://backend-service:8080"
+                  - name: wake-on-request
+                    image: ghcr.io/medotarek73/wake-on-request:latest
+                    env:
+                      - name: TARGET_DEPLOYMENT
+                        value: frontend-application
+                      - name: TARGET_PORT
+                        value: "3000"
+                      - name: IDLE_TIMEOUT
+                        value: "1800" # 30 min idle shutdown
                 imagePullSecrets:
                   - name: ghcr-secret
           ---
@@ -157,10 +164,16 @@ jobs:
             ports:
               - port: 3000
                 targetPort: 3000
-          EOF'
+          EOF
+          kubectl rollout restart deployment frontend-application -n $NS
 
-          # Backend Deployment
-          kubectl apply -f - <<EOF
+      - name: Deploy Backend Service + Wake-on-request sidecar
+        run: |
+          NS=${{ needs.build-frontend.outputs.namespace }}
+          IMAGE_TAG=${{ needs.build-frontend.outputs.image-tag }}
+
+          echo "🚀 Deploying/Updating Backend Service with wake-on-request"
+          sed 's/^          //' <<EOF | kubectl apply -f -
           apiVersion: apps/v1
           kind: Deployment
           metadata:
@@ -187,6 +200,15 @@ jobs:
                         value: "0.0.0.0"
                       - name: QUARKUS_HTTP_PORT
                         value: "8080"
+                  - name: wake-on-request
+                    image: ghcr.io/medotarek73/wake-on-request:latest
+                    env:
+                      - name: TARGET_DEPLOYMENT
+                        value: backend-service
+                      - name: TARGET_PORT
+                        value: "8080"
+                      - name: IDLE_TIMEOUT
+                        value: "1800"
                 imagePullSecrets:
                   - name: ghcr-secret
           ---
@@ -202,49 +224,38 @@ jobs:
               - port: 8080
                 targetPort: 8080
           EOF
+          kubectl rollout restart deployment backend-service -n $NS
 
-      - name: Deploy Wake-on-Request + Unified Idle Shutdown
+      - name: Create/Update Ingress
         run: |
           NS=${{ needs.build-frontend.outputs.namespace }}
-          kubectl apply -f - <<EOF
-          apiVersion: apps/v1
-          kind: Deployment
+          HOST="$NS.semibots.com"
+          sed 's/^          //' <<EOF | kubectl apply -f -
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
           metadata:
-            name: wakeonrequest
+            name: ${NS}-ingress
             namespace: $NS
+            annotations:
+              cert-manager.io/cluster-issuer: "letsencrypt-dns"
           spec:
-            replicas: 1
-            selector:
-              matchLabels:
-                app: wakeonrequest
-            template:
-              metadata:
-                labels:
-                  app: wakeonrequest
-              spec:
-                containers:
-                  - name: wakeonrequest
-                    image: bitnami/kubectl:latest
-                    command:
-                      - sh
-                      - -c
-                      - |
-                        while true; do
-                          # Listen on ports for wake requests
-                          nc -l -p 8081 -c "echo 'Waking frontend'; kubectl scale deployment frontend-application -n $NS --replicas=1"
-                          nc -l -p 8082 -c "echo 'Waking backend'; kubectl scale deployment backend-service -n $NS --replicas=1"
-                          # Idle shutdown every 30 min
-                          sleep 1800
-                          for APP in frontend-application backend-service; do
-                            READY=$(kubectl get deployment $APP -n $NS -o jsonpath='{.status.readyReplicas}')
-                            if [ "\$READY" == "1" ]; then
-                              echo "Scaling \$APP down to 0 due to idle"
-                              kubectl scale deployment $APP -n $NS --replicas=0
-                            fi
-                          done
-                        done
+            ingressClassName: traefik
+            tls:
+              - hosts:
+                  - $HOST
+                secretName: ${NS}-tls
+            rules:
+              - host: $HOST
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: frontend-application
+                          port:
+                            number: 3000
           EOF
-
   comment-on-pr:
     needs: [deploy-services, build-frontend]
     runs-on: ubuntu-latest
@@ -260,6 +271,7 @@ jobs:
               issue_number: context.issue.number,
             });
 
+            // Delete previous deployment comments
             for (const comment of comments) {
               if (comment.body.includes('🚀 Review App Launched')) {
                 await github.rest.issues.deleteComment({
@@ -270,9 +282,10 @@ jobs:
               }
             }
 
-            const frontendImage = `ghcr.io/medotarek73/nextjs-monorepo:${{ needs.build-frontend.outputs.image-tag }}`;
-            const backendImage = `ghcr.io/medotarek73/java-microservice-api:${{ needs.build-frontend.outputs.image-tag }}`;
             const namespace = '${{ needs.build-frontend.outputs.namespace }}';
+            const imageTag = '${{ needs.build-frontend.outputs.image-tag }}';
+            const frontendImage = `ghcr.io/medotarek73/nextjs-monorepo:${imageTag}`;
+            const backendImage = `ghcr.io/medotarek73/java-microservice-api:${imageTag}`;
             const url = `https://${namespace}.semibots.com`;
 
             const commentBody = `## 🚀 Review App Launched
@@ -287,13 +300,9 @@ jobs:
             - **🔗 Live URL:** ${url}
             - **📁 Kubernetes Namespace:** \`${namespace}\`
 
-            ### ⚡ Auto-Sleep Status:
-            - **Frontend & Backend:** ⚡ May be in idle mode; use wake-on-request ports 8081/8082 if sleeping
-
             ### 📋 Deployment Information:
             - **👤 Triggered by:** ${{ github.actor }}
-            - **🌿 Frontend Branch:** \`${{ github.head_ref }}\`
-            - **🌿 Backend Branch:** \`${{ github.head_ref }}\`
+            - **🌿 Branch:** \`${{ github.head_ref }}\`
             - **📝 Commit:** \`${{ github.event.pull_request.head.sha }}\`
             - **⏰ Deployed at:** ${new Date().toISOString()}
 
@@ -306,3 +315,4 @@ jobs:
               issue_number: context.issue.number,
               body: commentBody,
             });
+
