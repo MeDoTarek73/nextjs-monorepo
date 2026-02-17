@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: preview-autosleep
+  namespace: kube-system
+spec:
+  schedule: "*/30 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: sleeper
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Sleeping preview deployments..."
+
+              for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
+                kubectl get deploy -n $ns -l preview=true -o name 2>/dev/null | while read deploy; do
+                  kubectl scale $deploy -n $ns --replicas=0
+                done
+              done
+          restartPolicy: OnFailure
