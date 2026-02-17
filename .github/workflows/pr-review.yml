@@ -85,16 +85,6 @@ jobs:
           export KUBECONFIG=kubeconfig
           kubectl config get-contexts
 
-      - name: Ensure namespace exists
-        run: |
-          NS=${{ needs.build-frontend.outputs.namespace }}
-          if ! kubectl get namespace $NS >/dev/null 2>&1; then
-            echo "🧩 Creating namespace $NS"
-            kubectl create namespace $NS
-          else
-            echo "📝 Namespace $NS exists — updating deployments"
-          fi
-
       - name: Prepare GHCR access
         run: |
           NS=${{ needs.build-frontend.outputs.namespace }}
