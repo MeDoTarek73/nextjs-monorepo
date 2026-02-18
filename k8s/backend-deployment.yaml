@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: backend-service
-        image: ghcr.io/medotarek73/backend-application:${IMAGE_TAG}
+        image: ghcr.io/medotarek73/java-microservice-api:${IMAGE_TAG}
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -31,15 +31,6 @@ spec:
           limits:
             cpu: "1"
             memory: "1Gi"
-      # - name: wake-on-request
-      #   image: ghcr.io/medotarek73/wake-on-request:latest
-      #   env:
-      #   - name: TARGET_DEPLOYMENT
-      #     value: backend-service
-      #   - name: TARGET_PORT
-      #     value: "8080"
-      #   - name: IDLE_TIMEOUT
-      #     value: "1800"
       imagePullSecrets:
       - name: ghcr-secret
 ---

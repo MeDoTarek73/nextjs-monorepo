@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: frontend-application
-        image: ghcr.io/medotarek73/frontend-application:${IMAGE_TAG}
+        image: ghcr.io/medotarek73/nextjs-monorepo:${IMAGE_TAG}
         ports:
         - containerPort: 3000
         resources:

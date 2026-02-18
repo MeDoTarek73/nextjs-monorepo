@@ -57,7 +57,7 @@ jobs:
       - name: Build and push Frontend image
         id: frontend
         run: |
-          IMAGE_NAME="ghcr.io/medotarek73/frontend-application:$IMAGE_TAG"
+          IMAGE_NAME="ghcr.io/medotarek73/nextjs-monorepo:$IMAGE_TAG"
           echo "🛠️ Building frontend image $IMAGE_NAME"
           docker build -t $IMAGE_NAME -f ./apps/nextjs-app/Dockerfile .
           docker push $IMAGE_NAME
@@ -66,12 +66,12 @@ jobs:
       - name: Build or select Backend image
         id: backend
         run: |
-          IMAGE_NAME="ghcr.io/medotarek73/backend-application:$IMAGE_TAG"
+          IMAGE_NAME="ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG"
           if docker manifest inspect $IMAGE_NAME >/dev/null 2>&1; then
             echo "✅ Backend image for branch exists: $IMAGE_NAME"
           else
             echo "⚠️ Backend image not found for branch, using latest"
-            IMAGE_NAME="ghcr.io/medotarek73/backend-application:latest"
+            IMAGE_NAME="ghcr.io/medotarek73/java-microservice-api:latest"
             IMAGE_TAG="latest"
           fi
           echo "🛠️ Using backend image $IMAGE_NAME"
@@ -136,8 +136,8 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const frontendImage = `ghcr.io/medotarek73/frontend-application:${{ needs.build-and-deploy.outputs.frontend-image-tag }}`;
-            const backendImage = `ghcr.io/medotarek73/backend-application:${{ needs.build-and-deploy.outputs.backend-image-tag }}`;
+            const frontendImage = `ghcr.io/medotarek73/nextjs-monorepo:${{ needs.build-and-deploy.outputs.frontend-image-tag }}`;
+            const backendImage = `ghcr.io/medotarek73/java-microservice-api:${{ needs.build-and-deploy.outputs.backend-image-tag }}`;
             const namespace = '${{ needs.build-and-deploy.outputs.namespace }}';
             const url = `https://${namespace}.semibots.com`;
 
