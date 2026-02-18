@@ -64,7 +64,7 @@ jobs:
           context: .
           file: ./apps/nextjs-app/Dockerfile
           push: true
-          tags: ghcr.io/medotarek73/nextjs-monorepo:${{ steps.tags.outputs.IMAGE_TAG }}
+          tags: ghcr.io/medotarek73/nextjs-monorepo:${{ steps.tags.outputs.namespace }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
