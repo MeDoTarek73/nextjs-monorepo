@@ -13,11 +13,15 @@ permissions:
   pull-requests: write
 
 jobs:
-  build-frontend:
+  build-images:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [frontend, backend]
     outputs:
-      image-tag: ${{ steps.build.outputs.image-tag }}
-      namespace: ${{ steps.build.outputs.namespace }}
+      frontend-image-tag: ${{ steps.set-output.outputs.frontend-image-tag }}
+      backend-image-tag: ${{ steps.set-output.outputs.backend-image-tag }}
+      namespace: ${{ steps.set-output.outputs.namespace }}
 
     steps:
       - name: Check branch prefix
@@ -40,77 +44,68 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Build and push Frontend image
+      - name: Build and push image
         id: build
         run: |
           BRANCH_NAME="${{ github.head_ref }}"
-          IMAGE_TAG=${BRANCH_NAME#feature/}
-          IMAGE_TAG=$(echo "$IMAGE_TAG" \
+          IMAGE_TAG=$(echo "${BRANCH_NAME#feature/}" \
             | tr '[:upper:]' '[:lower:]' \
             | sed 's/[^a-z0-9-]/-/g' \
             | sed 's/--*/-/g' \
             | sed 's/^-//' \
             | sed 's/-$//' \
             | cut -c1-63)
-          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          IMAGE_NAME="ghcr.io/$REPO_NAME:$IMAGE_TAG"
 
-          if ! [[ $IMAGE_TAG =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
-            echo "❌ Invalid DNS-compatible namespace: $IMAGE_TAG"
-            exit 1
-          fi
+          IMAGE_NAME="ghcr.io/medotarek73/${{ matrix.service }}-application:$IMAGE_TAG"
+          DOCKERFILE_PATH="./apps/${{ matrix.service == 'frontend' && 'nextjs-app' || 'backend' }}/Dockerfile"
 
-          echo "🛠️ Building Frontend image $IMAGE_NAME"
-          docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
+          echo "🛠️ Building ${{ matrix.service }} image $IMAGE_NAME"
+          docker build -t $IMAGE_NAME -f $DOCKERFILE_PATH .
           docker push $IMAGE_NAME
 
-          echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "namespace=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          if [[ "${{ matrix.service }}" == "frontend" ]]; then
+            echo "frontend-image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+            echo "namespace=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "backend-image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set output for other jobs
+        id: set-output
+        run: |
+          echo "frontend-image-tag=${{ steps.build.outputs.frontend-image-tag }}" >> $GITHUB_OUTPUT
+          echo "backend-image-tag=${{ steps.build.outputs.backend-image-tag }}" >> $GITHUB_OUTPUT
+          echo "namespace=${{ steps.build.outputs.namespace }}" >> $GITHUB_OUTPUT
 
   deploy-services:
-    needs: build-frontend
+    needs: build-images
     runs-on: ubuntu-latest
-    outputs:
-      backend-image-tag: ${{ steps.set-output.outputs.backend-image-tag }}
-      backend-branch-name: ${{ steps.set-output.outputs.backend-branch-name }}
 
     steps:
       - name: Set up kubectl
         run: |
           echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
           export KUBECONFIG=kubeconfig
-          kubectl config get-contexts
 
       - name: Prepare namespace and GHCR access
         run: |
-          export KUBECONFIG=kubeconfig
-          NS=${{ needs.build-frontend.outputs.namespace }}
+          NS=${{ needs.build-images.outputs.namespace }}
 
-          echo "🧩 Creating namespace $NS"
           kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
-
-          echo "🔐 Creating/Updating GHCR secret in namespace"
           kubectl create secret docker-registry ghcr-secret \
             --docker-server=ghcr.io \
             --docker-username=${{ github.actor }} \
             --docker-password=${{ secrets.REGISTRY_PASSWORD }} \
             --docker-email=${{ github.actor }}@users.noreply.github.com \
-            -n $NS \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-          echo "🪪 Patching default ServiceAccount in namespace $NS"
+            -n $NS --dry-run=client -o yaml | kubectl apply -f -
           kubectl patch serviceaccount default -n $NS \
             -p '{"imagePullSecrets": [{"name": "ghcr-secret"}]}'
 
-      - name: Deploy Frontend Service
+      - name: Deploy Frontend
         run: |
-          export KUBECONFIG=kubeconfig
-          NS=${{ needs.build-frontend.outputs.namespace }}
-          IMAGE_TAG=${{ needs.build-frontend.outputs.image-tag }}
+          NS=${{ needs.build-images.outputs.namespace }}
+          IMAGE_TAG=${{ needs.build-images.outputs.frontend-image-tag }}
 
-          echo "🚀 Deploying Frontend Service"
-
-          # Force delete existing deployment and pods
           kubectl delete deployment frontend-application -n $NS --ignore-not-found=true
           kubectl delete pods -l app=frontend-application -n $NS --ignore-not-found=true
 
@@ -132,11 +127,10 @@ jobs:
               spec:
                 containers:
                 - name: frontend-application
-                  image: ghcr.io/medotarek73/nextjs-monorepo:$IMAGE_TAG
+                  image: ghcr.io/medotarek73/frontend-application:$IMAGE_TAG
                   imagePullPolicy: Always
                   ports:
                   - containerPort: 3000
-                  # ✅ CRITICAL FIX (CPU starvation)
                   resources:
                     requests:
                       cpu: "100m"
@@ -157,7 +151,7 @@ jobs:
                     - name: TARGET_PORT
                       value: "3000"
                     - name: IDLE_TIMEOUT
-                      value: "1800" # 30 min idle shutdown
+                      value: "1800"
                 imagePullSecrets:
                 - name: ghcr-secret
           ---
@@ -174,28 +168,11 @@ jobs:
               targetPort: 3000
           EOF
 
-      - name: Check Backend image availability
+      - name: Deploy Backend
         run: |
-          export KUBECONFIG=kubeconfig
-          IMAGE_TAG=${{ needs.build-frontend.outputs.image-tag }}
+          NS=${{ needs.build-images.outputs.namespace }}
+          IMAGE_TAG=${{ needs.build-images.outputs.backend-image-tag }}
 
-          echo "🔍 Checking Backend image availability"
-          if docker manifest inspect "ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG" >/dev/null 2>&1; then
-            echo "✅ Backend image with tag $IMAGE_TAG found"
-            echo "BACKEND_IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-          else
-            echo "⚠️ Backend image with tag $IMAGE_TAG not found, using latest"
-            echo "BACKEND_IMAGE_TAG=latest" >> $GITHUB_ENV
-          fi
-
-      - name: Deploy Backend Service
-        run: |
-          export KUBECONFIG=kubeconfig
-          NS=${{ needs.build-frontend.outputs.namespace }}
-
-          echo "🚀 Deploying Backend Service"
-
-          # Delete existing deployment if it exists
           kubectl delete deployment backend-service -n $NS --ignore-not-found=true
 
           kubectl apply -f - <<EOF
@@ -216,7 +193,7 @@ jobs:
               spec:
                 containers:
                   - name: backend-service
-                    image: ghcr.io/medotarek73/java-microservice-api:$BACKEND_IMAGE_TAG
+                    image: ghcr.io/medotarek73/backend-application:$IMAGE_TAG
                     ports:
                       - containerPort: 8080
                     env:
@@ -256,14 +233,10 @@ jobs:
               targetPort: 8080
           EOF
 
-          echo "✅ Backend service deployed successfully"
       - name: Create Ingress
         run: |
-          export KUBECONFIG=kubeconfig
-          NS=${{ needs.build-frontend.outputs.namespace }}
-
+          NS=${{ needs.build-images.outputs.namespace }}
           HOST="$NS.semibots.com"
-          echo "🌐 Creating ingress for $HOST"
 
           kubectl apply -f - <<EOF
           apiVersion: networking.k8s.io/v1
@@ -292,50 +265,19 @@ jobs:
                         number: 3000
           EOF
 
-          echo "✅ Frontend deployed successfully at https://$HOST"
-
-      - name: Set output for comment job
-        id: set-output
-        run: |
-          echo "backend-image-tag=$BACKEND_IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "backend-branch-name=feature/$BACKEND_IMAGE_TAG" >> $GITHUB_OUTPUT
   comment-on-pr:
-    needs: [build-frontend, deploy-services]
+    needs: [deploy-services, build-images]
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-
     steps:
       - name: Comment on PR
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            // Delete previous deployment comments
-            for (const comment of comments) {
-              if (comment.body.includes('🚀 Review App Launched')) {
-                await github.rest.issues.deleteComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: comment.id,
-                });
-              }
-            }
-
-            // Get deployment info
-            const frontendImage = `ghcr.io/medotarek73/nextjs-monorepo:${{ needs.build-frontend.outputs.image-tag }}`;
-            const backendImage = `ghcr.io/medotarek73/java-microservice-api:${{ needs.deploy-services.outputs.backend-image-tag }}`;
-            const namespace = '${{ needs.build-frontend.outputs.namespace }}';
+            const frontendImage = `ghcr.io/medotarek73/frontend-application:${{ needs.build-images.outputs.frontend-image-tag }}`;
+            const backendImage = `ghcr.io/medotarek73/backend-application:${{ needs.build-images.outputs.backend-image-tag }}`;
+            const namespace = '${{ needs.build-images.outputs.namespace }}';
             const url = `https://${namespace}.semibots.com`;
-
-            // Determine backend image status
-            const backendImageStatus = '${{ needs.deploy-services.outputs.backend-image-tag }}' === '${{ needs.build-frontend.outputs.image-tag }}'
-              ? 'Latest feature branch package deployed'
-              : 'Using latest tag (feature branch package not found)';
 
             const commentBody = `## 🚀 Review App Launched
 
@@ -351,12 +293,12 @@ jobs:
 
             ### 🔄 Package Status:
             - **Frontend:** ✅ Latest feature branch package deployed
-            - **Backend:**  ✅ ${backendImageStatus}
+            - **Backend:** ✅ Latest feature branch package deployed
 
             ### 📋 Deployment Information:
             - **👤 Triggered by:** ${{ github.actor }}
             - **🌿 Frontend Branch:** \`${{ github.head_ref }}\`
-             - **🌿 Backend Branch:** \`${{ needs.deploy-services.outputs.backend-branch-name }}\`
+            - **🌿 Backend Branch:** \`${{ github.head_ref }}\`
             - **📝 Commit:** \`${{ github.event.pull_request.head.sha }}\`
             - **⏰ Deployed at:** ${new Date().toISOString()}
 
