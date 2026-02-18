@@ -96,7 +96,7 @@ jobs:
         run: |
           echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
           export KUBECONFIG=kubeconfig
-
+          kubectl config get-contexts
       - name: Prepare namespace and GHCR access
         run: |
           NS=${{ needs.build-images.outputs.namespace }}
