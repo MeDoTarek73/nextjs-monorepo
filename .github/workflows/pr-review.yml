@@ -108,20 +108,19 @@ jobs:
           IMAGE_TAG=${{ steps.frontend.outputs.frontend-image-tag }}
           kubectl delete deployment frontend-application -n $NS --ignore-not-found=true
           kubectl delete pods -l app=frontend-application -n $NS --ignore-not-found=true
-          kubectl apply -f ./k8s/frontend-deployment.yaml # أو استخدم inline manifest كما في المثال السابق
-
+          kubectl apply -f ./k8s/frontend-deployment.yaml
       - name: Deploy Backend Service
         run: |
           NS=${{ steps.tags.outputs.namespace }}
           IMAGE_TAG=${{ steps.backend.outputs.backend-image-tag }}
           kubectl delete deployment backend-service -n $NS --ignore-not-found=true
-          kubectl apply -f ./k8s/backend-deployment.yaml # أو استخدم inline manifest
+          kubectl apply -f ./k8s/backend-deployment.yaml
 
       - name: Create Ingress
         run: |
           NS=${{ steps.tags.outputs.namespace }}
           HOST="$NS.semibots.com"
-          kubectl apply -f ./k8s/ingress.yaml # أو استخدم inline manifest
+          kubectl apply -f ./k8s/ingress.yaml
 
   comment-on-pr:
     needs: build-and-deploy
