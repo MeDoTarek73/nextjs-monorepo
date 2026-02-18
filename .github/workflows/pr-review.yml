@@ -103,24 +103,29 @@ jobs:
             -p '{"imagePullSecrets": [{"name": "ghcr-secret"}]}'
 
       - name: Deploy Frontend Service
+        env:
+          NS: ${{ steps.tags.outputs.namespace }}
+          IMAGE_TAG: ${{ steps.frontend.outputs.frontend-image-tag }}
         run: |
-          NS=${{ steps.tags.outputs.namespace }}
-          IMAGE_TAG=${{ steps.frontend.outputs.frontend-image-tag }}
+          echo "🚀 Deploying Frontend Service to namespace $NS with image tag $IMAGE_TAG"
           kubectl delete deployment frontend-application -n $NS --ignore-not-found=true
           kubectl delete pods -l app=frontend-application -n $NS --ignore-not-found=true
-          kubectl apply -f ./k8s/frontend-deployment.yaml
+          envsubst < ./k8s/frontend-deployment.yaml | kubectl apply -f -
       - name: Deploy Backend Service
+        env:
+          NS: ${{ steps.tags.outputs.namespace }}
+          IMAGE_TAG: ${{ steps.backend.outputs.backend-image-tag }}
         run: |
-          NS=${{ steps.tags.outputs.namespace }}
-          IMAGE_TAG=${{ steps.backend.outputs.backend-image-tag }}
+          echo "🚀 Deploying Backend Service to namespace $NS with image tag $IMAGE_TAG"
           kubectl delete deployment backend-service -n $NS --ignore-not-found=true
-          kubectl apply -f ./k8s/backend-deployment.yaml
-
-      - name: Create Ingress
+          envsubst < ./k8s/backend-deployment.yaml | kubectl apply -f -
+      - name: Deploy Frontend Ingress
+        env:
+          NS: ${{ steps.tags.outputs.namespace }}
+          HOST: ${{ steps.tags.outputs.namespace }}.semibots.com
         run: |
-          NS=${{ steps.tags.outputs.namespace }}
-          HOST="$NS.semibots.com"
-          kubectl apply -f ./k8s/ingress.yaml
+          echo "🌐 Creating ingress for $HOST in namespace $NS"
+          envsubst < ./k8s/ingress.yaml | kubectl apply -f -
 
   comment-on-pr:
     needs: build-and-deploy

@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-service
+  namespace: ${NS}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend-service
+  template:
+    metadata:
+      labels:
+        app: backend-service
+    spec:
+      containers:
+      - name: backend-service
+        image: ghcr.io/medotarek73/backend-application:${IMAGE_TAG}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        env:
+        - name: QUARKUS_HTTP_HOST
+          value: "0.0.0.0"
+        - name: QUARKUS_HTTP_PORT
+          value: "8080"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+      # - name: wake-on-request
+      #   image: ghcr.io/medotarek73/wake-on-request:latest
+      #   env:
+      #   - name: TARGET_DEPLOYMENT
+      #     value: backend-service
+      #   - name: TARGET_PORT
+      #     value: "8080"
+      #   - name: IDLE_TIMEOUT
+      #     value: "1800"
+      imagePullSecrets:
+      - name: ghcr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: ${NS}
+spec:
+  selector:
+    app: backend-service
+  ports:
+  - port: 8080
+    targetPort: 8080

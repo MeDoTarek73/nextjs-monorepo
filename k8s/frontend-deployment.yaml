@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-application
+  namespace: ${NS}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend-application
+  template:
+    metadata:
+      labels:
+        app: frontend-application
+    spec:
+      containers:
+      - name: frontend-application
+        image: ghcr.io/medotarek73/frontend-application:${IMAGE_TAG}
+        ports:
+        - containerPort: 3000
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "300m"
+            memory: "256Mi"
+      imagePullSecrets:
+      - name: ghcr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-application
+  namespace: ${NS}
+spec:
+  selector:
+    app: frontend-application
+  ports:
+  - port: 3000
+    targetPort: 3000
