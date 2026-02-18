@@ -44,7 +44,7 @@ jobs:
       - name: Set Image Tags
         id: tags
         run: |
-          IMAGE_TAG=$(echo "${{ github.head_ref#feature/ }}" \
+          IMAGE_TAG=$(echo "${{ github.head_ref }}" | sed 's/^feature\///' \
             | tr '[:upper:]' '[:lower:]' \
             | sed 's/[^a-z0-9-]/-/g' \
             | sed 's/--*/-/g' \
