@@ -45,9 +45,20 @@ jobs:
         run: |
           BRANCH_NAME="${{ github.head_ref }}"
           IMAGE_TAG=${BRANCH_NAME#feature/}
-          IMAGE_TAG=$(echo $IMAGE_TAG | tr '[:upper:]' '[:lower:]')
+          IMAGE_TAG=$(echo "$IMAGE_TAG" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed 's/[^a-z0-9-]/-/g' \
+            | sed 's/--*/-/g' \
+            | sed 's/^-//' \
+            | sed 's/-$//' \
+            | cut -c1-63)
           REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_NAME="ghcr.io/$REPO_NAME:$IMAGE_TAG"
+
+          if ! [[ $IMAGE_TAG =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
+            echo "❌ Invalid DNS-compatible namespace: $IMAGE_TAG"
+            exit 1
+          fi
 
           echo "🛠️ Building Frontend image $IMAGE_NAME"
           docker build -t $IMAGE_NAME -f apps/nextjs-app/Dockerfile .
@@ -56,9 +67,12 @@ jobs:
           echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "namespace=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-  deploy-frontend:
+  deploy-services:
     needs: build-frontend
     runs-on: ubuntu-latest
+    outputs:
+      backend-image-tag: ${{ steps.set-output.outputs.backend-image-tag }}
+      backend-branch-name: ${{ steps.set-output.outputs.backend-branch-name }}
 
     steps:
       - name: Set up kubectl
@@ -127,6 +141,15 @@ jobs:
                     value: "production"
                   - name: API_URL
                     value: "http://backend-service:8080"
+                - name: wake-on-request
+                  image: ghcr.io/medotarek73/wake-on-request:latest
+                  env:
+                    - name: TARGET_DEPLOYMENT
+                      value: frontend-application
+                    - name: TARGET_PORT
+                      value: "3000"
+                    - name: IDLE_TIMEOUT
+                      value: "1800" # 30 min idle shutdown
                 imagePullSecrets:
                 - name: ghcr-secret
           ---
@@ -143,75 +166,17 @@ jobs:
               targetPort: 3000
           EOF
 
-      - name: Create Ingress
-        run: |
-          export KUBECONFIG=kubeconfig
-          NS=${{ needs.build-frontend.outputs.namespace }}
-
-          HOST="$NS.semibots.com"
-          echo "🌐 Creating ingress for $HOST"
-
-          kubectl apply -f - <<EOF
-          apiVersion: networking.k8s.io/v1
-          kind: Ingress
-          metadata:
-            name: ${NS}-ingress
-            namespace: $NS
-            annotations:
-              cert-manager.io/cluster-issuer: "letsencrypt-dns"
-          spec:
-            ingressClassName: traefik
-            tls:
-            - hosts:
-              - $HOST
-              secretName: ${NS}-tls
-            rules:
-            - host: $HOST
-              http:
-                paths:
-                - path: /
-                  pathType: Prefix
-                  backend:
-                    service:
-                      name: frontend-application
-                      port:
-                        number: 3000
-          EOF
-
-          echo "✅ Frontend deployed successfully at https://$HOST"
-
-  deploy-backend:
-    needs: build-frontend
-    runs-on: ubuntu-latest
-    outputs:
-      backend-image-tag: ${{ steps.set-output.outputs.backend-image-tag }}
-      backend-branch-name: ${{ steps.set-output.outputs.backend-branch-name }}
-
-    steps:
-      - name: Set up kubectl
-        run: |
-          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
-          export KUBECONFIG=kubeconfig
-          kubectl config get-contexts
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-
-      - name: Check Java microservice image availability
+      - name: Check Backend image availability
         run: |
           export KUBECONFIG=kubeconfig
           IMAGE_TAG=${{ needs.build-frontend.outputs.image-tag }}
 
-          echo "🔍 Checking Java microservice image availability"
+          echo "🔍 Checking Backend image availability"
           if docker manifest inspect "ghcr.io/medotarek73/java-microservice-api:$IMAGE_TAG" >/dev/null 2>&1; then
-            echo "✅ Java microservice image with tag $IMAGE_TAG found"
+            echo "✅ Backend image with tag $IMAGE_TAG found"
             echo "BACKEND_IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
           else
-            echo "⚠️ Java microservice image with tag $IMAGE_TAG not found, using latest"
+            echo "⚠️ Backend image with tag $IMAGE_TAG not found, using latest"
             echo "BACKEND_IMAGE_TAG=latest" >> $GITHUB_ENV
           fi
 
@@ -269,15 +234,50 @@ jobs:
           EOF
 
           echo "✅ Backend service deployed successfully"
+      - name: Create Ingress
+        run: |
+          export KUBECONFIG=kubeconfig
+          NS=${{ needs.build-frontend.outputs.namespace }}
+
+          HOST="$NS.semibots.com"
+          echo "🌐 Creating ingress for $HOST"
+
+          kubectl apply -f - <<EOF
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: ${NS}-ingress
+            namespace: $NS
+            annotations:
+              cert-manager.io/cluster-issuer: "letsencrypt-dns"
+          spec:
+            ingressClassName: traefik
+            tls:
+            - hosts:
+              - $HOST
+              secretName: ${NS}-tls
+            rules:
+            - host: $HOST
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: frontend-application
+                      port:
+                        number: 3000
+          EOF
+
+          echo "✅ Frontend deployed successfully at https://$HOST"
 
       - name: Set output for comment job
         id: set-output
         run: |
           echo "backend-image-tag=$BACKEND_IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "backend-branch-name=feature/$BACKEND_IMAGE_TAG" >> $GITHUB_OUTPUT
-
   comment-on-pr:
-    needs: [build-frontend, deploy-frontend, deploy-backend]
+    needs: [build-frontend, deploy-services]
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
 
@@ -305,12 +305,12 @@ jobs:
 
             // Get deployment info
             const frontendImage = `ghcr.io/medotarek73/nextjs-monorepo:${{ needs.build-frontend.outputs.image-tag }}`;
-            const backendImage = `ghcr.io/medotarek73/java-microservice-api:${{ needs.deploy-backend.outputs.backend-image-tag }}`;
+            const backendImage = `ghcr.io/medotarek73/java-microservice-api:${{ needs.deploy-services.outputs.backend-image-tag }}`;
             const namespace = '${{ needs.build-frontend.outputs.namespace }}';
             const url = `https://${namespace}.semibots.com`;
 
             // Determine backend image status
-            const backendImageStatus = '${{ needs.deploy-backend.outputs.backend-image-tag }}' === '${{ needs.build-frontend.outputs.image-tag }}'
+            const backendImageStatus = '${{ needs.deploy-services.outputs.backend-image-tag }}' === '${{ needs.build-frontend.outputs.image-tag }}'
               ? 'Latest feature branch package deployed'
               : 'Using latest tag (feature branch package not found)';
 
@@ -333,7 +333,7 @@ jobs:
             ### 📋 Deployment Information:
             - **👤 Triggered by:** ${{ github.actor }}
             - **🌿 Frontend Branch:** \`${{ github.head_ref }}\`
-             - **🌿 Backend Branch:** \`${{ needs.deploy-backend.outputs.backend-branch-name }}\`
+             - **🌿 Backend Branch:** \`${{ needs.deploy-services.outputs.backend-branch-name }}\`
             - **📝 Commit:** \`${{ github.event.pull_request.head.sha }}\`
             - **⏰ Deployed at:** ${new Date().toISOString()}
 
