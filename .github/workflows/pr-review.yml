@@ -110,7 +110,7 @@ jobs:
       - name: Deploy Frontend Service
         env:
           NS: ${{ steps.tags.outputs.namespace }}
-          IMAGE_TAG: ${{ steps.frontend.outputs.frontend-image-tag }}
+          IMAGE_TAG: ${{ steps.tags.outputs.namespace }}
         run: |
           echo "🚀 Deploying Frontend Service to namespace $NS with image tag $IMAGE_TAG"
           kubectl delete deployment frontend-application -n $NS --ignore-not-found=true
