@@ -56,19 +56,29 @@ jobs:
             | sed 's/-$//' \
             | cut -c1-63)
 
-          IMAGE_NAME="ghcr.io/medotarek73/${{ matrix.service }}-application:$IMAGE_TAG"
-          DOCKERFILE_PATH="./apps/${{ matrix.service == 'frontend' && 'nextjs-app' || 'backend' }}/Dockerfile"
-
-          echo "🛠️ Building ${{ matrix.service }} image $IMAGE_NAME"
-          docker build -t $IMAGE_NAME -f $DOCKERFILE_PATH .
-          docker push $IMAGE_NAME
-
           if [[ "${{ matrix.service }}" == "frontend" ]]; then
+            IMAGE_NAME="ghcr.io/medotarek73/frontend-application:$IMAGE_TAG"
+            echo "🛠️ Building frontend image $IMAGE_NAME"
+            docker build -t $IMAGE_NAME -f ./apps/nextjs-app/Dockerfile .
+            docker push $IMAGE_NAME
             echo "frontend-image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
             echo "namespace=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
           else
+            # Backend: check if image exists for this branch
+            BACKEND_IMAGE="ghcr.io/medotarek73/backend-application:$IMAGE_TAG"
+            if docker manifest inspect $BACKEND_IMAGE >/dev/null 2>&1; then
+              echo "✅ Backend image for branch exists: $BACKEND_IMAGE"
+            else
+              echo "⚠️ Backend image for branch not found, using latest"
+              IMAGE_TAG="latest"
+              BACKEND_IMAGE="ghcr.io/medotarek73/backend-application:latest"
+            fi
+
+            echo "🛠️ Using backend image $BACKEND_IMAGE"
             echo "backend-image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
           fi
+
 
       - name: Set output for other jobs
         id: set-output
