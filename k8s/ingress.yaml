@@ -1,25 +1,24 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: nextjs-ingress
-  namespace: default
+  name: ${NS}-ingress
+  namespace: ${NS}
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-dns"
 spec:
   ingressClassName: traefik
   tls:
-  - hosts:
-    - '*.semibots.com'
-    - 'semibots.com'
-    secretName: wildcard-semibots-com-tls
+    - hosts:
+        - ${HOST}
+      secretName: ${NS}-tls
   rules:
-  - host: 'semibots.com'
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: nextjs-service
-            port:
-              number: 80
+    - host: ${HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-application
+                port:
+                  number: 3000

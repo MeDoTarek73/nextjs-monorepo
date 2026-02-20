@@ -5,7 +5,7 @@ on:
     types: [closed]
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -13,14 +13,51 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set up kubectl
-        run: |
-          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
-          export KUBECONFIG=kubeconfig
+    # -------------------------------------------------------
+    # Checkout the repository code
+    # -------------------------------------------------------
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-          NS=${{ github.head_ref }}
-          NS=${NS#feature/}
-          NS=$(echo $NS | tr '[:upper:]' '[:lower:]')
+    # -------------------------------------------------------
+    # Set up kubectl
+    # -------------------------------------------------------
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v4
+      with:
+        version: "v1.28.0"
 
-          echo "🧹 Deleting namespace $NS"
-          kubectl delete namespace $NS --ignore-not-found=true
+    # -------------------------------------------------------
+    # Configure kubeconfig
+    # -------------------------------------------------------
+    - name: Configure kubeconfig
+      run: |
+        echo "${{ secrets.KUBECONFIG_DATA }}" | base64 --decode > kubeconfig
+        echo "KUBECONFIG=${{ github.workspace }}/kubeconfig" >> $GITHUB_ENV
+
+    # -------------------------------------------------------
+    # Cleanup namespace
+    # -------------------------------------------------------
+    - name: Cleanup namespace
+      run: |
+        NS=$(echo "${{ github.head_ref }}" | sed 's/^feature\///' \
+          | tr '[:upper:]' '[:lower:]' \
+          | sed 's/[^a-z0-9-]/-/g' \
+          | sed 's/--*/-/g' \
+          | sed 's/^-//' \
+          | sed 's/-$//' \
+          | cut -c1-63)
+        echo "🧹 Deleting namespace $NS"
+        kubectl delete namespace $NS --ignore-not-found=true
+
+    # -------------------------------------------------------
+    # Delete the feature branch from the repository
+    # -------------------------------------------------------
+    - name: Delete the feature branch from the repository
+      run: |
+        BRANCH_NAME="${{ github.head_ref }}"
+        echo "🧹 Deleting branch $BRANCH_NAME"
+        git push origin --delete $BRANCH_NAME || echo "Branch may already be deleted"
+
