@@ -35,8 +35,8 @@ export default function Index() {
         <div className="container">
           <div id="welcome">
             <h1>
-              <span> Hello There, </span>
-              Welcome 👋
+              <span> Hello there, </span>
+              Welcome 👋 Barry
             </h1>
 
             {/* Backend API Call Section */}
